@@ -124,7 +124,26 @@ class OCVoiceMenuBar(rumps.App if HAS_RUMPS else object):
         self.menu.add(lang_menu)
 
         self.menu.add(None)
-        self.menu.add(rumps.MenuItem("⚙️ Settings", callback=self._action_settings))
+        # Settings submenu with current values
+        import os as _os
+        _cfg_path = _os.path.expanduser("~/.config/ocvoice/config.toml")
+        _wake_display = "?"
+        _send_display = "?"
+        try:
+            with open(_cfg_path) as _f:
+                for _line in _f:
+                    if _line.startswith("wake_words"):
+                        _wake_display = _line.split("=")[1].strip().strip(",").strip("[]").replace('"', '').strip()[:40]
+                    elif _line.startswith("send_phrases"):
+                        _send_display = _line.split("=")[1].strip().strip(",").strip("[]").replace('"', '').strip()[:40]
+        except Exception:
+            pass
+        settings_menu = rumps.MenuItem("⚙️ Settings")
+        settings_menu.add(rumps.MenuItem(f"🎤 Wake: {_wake_display}", callback=None))
+        settings_menu.add(rumps.MenuItem(f"✉️ Send: {_send_display}", callback=None))
+        settings_menu.add(None)
+        settings_menu.add(rumps.MenuItem("📝 Edit config", callback=self._action_settings))
+        self.menu.add(settings_menu)
         self.menu.add(None)
         self.menu.add(rumps.MenuItem("📋 Status", callback=self._action_status))
         self.menu.add(rumps.MenuItem("❌ Quit", callback=self._action_quit))

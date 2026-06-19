@@ -58,7 +58,8 @@ class TrayIcon:
             pystray.MenuItem("🎤 Start", self._action_start),
             pystray.MenuItem("🔇 Stop", self._action_stop),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("⚙️ Settings", self._action_settings),
+            pystray.MenuItem("🔤 Language", self._build_language_menu()),
+            pystray.MenuItem("⚙️ Settings", self._build_settings_menu()),
             pystray.MenuItem("❌ Exit", self._action_exit),
         )
 
@@ -141,7 +142,7 @@ class TrayIcon:
             pystray.MenuItem("🔇 Stop", self._action_stop),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("🔤 Language", self._build_language_menu()),
-            pystray.MenuItem("⚙️ Settings", self._action_settings),
+            pystray.MenuItem("⚙️ Settings", self._build_settings_menu()),
             pystray.MenuItem("❌ Exit", self._action_exit),
         )
 
@@ -211,6 +212,47 @@ class TrayIcon:
                 )
             )
         return pystray.Menu(*items)
+
+    @staticmethod
+    def _open_config():
+        """Open config file in system editor."""
+        config_path = Path.home() / ".config" / "ocvoice" / "config.toml"
+        if config_path.exists():
+            import webbrowser
+            webbrowser.open(str(config_path))
+
+    def _build_settings_menu(self):
+        """Build settings submenu with editable configs."""
+        config_path = Path.home() / ".config" / "ocvoice" / "config.toml"
+        exists = config_path.exists()
+        import os as _os
+        os_cfg = _os.path.expanduser("~/.config/ocvoice/config.toml")
+        wake = "?"
+        send = "?"
+        try:
+            with open(os_cfg) as f:
+                for line in f:
+                    if line.startswith("wake_words"):
+                        wake = line.split("=")[1].strip().strip(",").strip("[]").replace('"', '').strip()
+                    elif line.startswith("send_phrases"):
+                        send = line.split("=")[1].strip().strip(",").strip("[]").replace('"', '').strip()
+        except Exception:
+            pass
+        return pystray.Menu(
+            pystray.MenuItem(
+                f"🎤 Wake: {wake[:30]}" if exists else "🎤 Wake words",
+                lambda *_: self._open_config(),
+            ),
+            pystray.MenuItem(
+                f"✉️ Send: {send[:30]}" if exists else "✉️ Send phrases",
+                lambda *_: self._open_config(),
+            ),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem(
+                "📝 Edit config file" if exists else "📝 Create config",
+                lambda *_: self._open_config(),
+            ),
+        )
 
     def _create_icon(self, status: str):
         try:
