@@ -49,24 +49,34 @@ def _load_config() -> dict:
 
 
 def _save_config(cfg: dict):
-    """Write config dict to file as TOML."""
+    """Write config dict to file as TOML (handles nested sections)."""
+    sections: dict[str, list] = {}
+
+    def _flatten(d: dict, prefix: str):
+        for key, val in d.items():
+            if isinstance(val, dict):
+                new_prefix = f"{prefix}.{key}" if prefix else key
+                _flatten(val, new_prefix)
+            else:
+                sections.setdefault(prefix, []).append((key, val))
+
+    _flatten(cfg, "")
+
     lines = []
-    for section, values in cfg.items():
-        if isinstance(values, dict):
+    for section in sorted(sections.keys()):
+        if section:
             lines.append(f"[{section}]")
-            for key, val in values.items():
-                if isinstance(val, dict):
-                    continue
-                if isinstance(val, str):
-                    lines.append(f'{key} = "{val}"')
-                elif isinstance(val, bool):
-                    lines.append(f'{key} = {"true" if val else "false"}')
-                elif isinstance(val, list):
-                    items = ", ".join(f'"{v}"' for v in val)
-                    lines.append(f'{key} = [{items}]')
-                else:
-                    lines.append(f'{key} = {val}')
-            lines.append("")
+        for key, val in sections[section]:
+            if isinstance(val, str):
+                lines.append(f'{key} = "{val}"')
+            elif isinstance(val, bool):
+                lines.append(f'{key} = {"true" if val else "false"}')
+            elif isinstance(val, list):
+                items = ", ".join(f'"{v}"' for v in val)
+                lines.append(f'{key} = [{items}]')
+            else:
+                lines.append(f'{key} = {val}')
+        lines.append("")
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     CONFIG_PATH.write_text("\n".join(lines), encoding="utf-8")
 
