@@ -1430,29 +1430,29 @@ class VoiceDaemon:
             conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
             if project_worktree:
                 cur = conn.execute(
-                    "SELECT s.id, s.title, p.worktree, s.time_created "
+                    "SELECT s.id, s.title, p.worktree, s.time_updated "
                     "FROM session s "
                     "LEFT JOIN project p ON s.project_id = p.id "
                     "WHERE p.worktree = ? AND s.title NOT LIKE '%[OCVoice]%' "
-                    "ORDER BY s.time_created DESC",
+                    "ORDER BY s.time_updated DESC",
                     (project_worktree,)
                 )
             else:
                 cur = conn.execute(
-                    "SELECT s.id, s.title, p.worktree, s.time_created "
+                    "SELECT s.id, s.title, p.worktree, s.time_updated "
                     "FROM session s "
                     "LEFT JOIN project p ON s.project_id = p.id "
                     "WHERE s.title NOT LIKE '%[OCVoice]%' "
-                    "ORDER BY s.time_created DESC"
+                    "ORDER BY s.time_updated DESC"
                 )
             result = []
             for row in cur.fetchall():
-                sid, title, wt, t_created = row
+                sid, title, wt, t_updated = row
                 result.append({
                     "id": sid,
                     "title": title or "untitled",
                     "directory": wt or "",
-                    "time": {"updated": t_created or 0},
+                    "time": {"updated": t_updated or 0},
                 })
             conn.close()
             return result
