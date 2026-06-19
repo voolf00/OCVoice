@@ -42,9 +42,11 @@ class ParsedCommand:
 class RegexIntentParser:
     """Rule-based intent parser using regex patterns."""
 
-    def __init__(self, confidence_threshold: float = 0.7, language: str = "auto"):
+    def __init__(self, confidence_threshold: float = 0.7, language: str = "auto",
+                 wake_words: list[str] | None = None):
         self.threshold = confidence_threshold
         self._language = language
+        self._wake_words = wake_words or ["окей код", "hey code"]
 
         # Compile all patterns
         self._patterns_ru = self._compile(INTENT_PATTERNS_RU)
@@ -101,11 +103,16 @@ class RegexIntentParser:
 
     def _strip_wake_words(self, text: str) -> str:
         """Remove known wake words from the text."""
-        wake_phrases = [
-            "окей код", "окей code", "okay code",
-            "hey code", "эй код", "хей код",
-            "окей", "okay",
-        ]
+        # Build variants from configured wake words
+        wake_phrases = list(self._wake_words)
+        for w in self._wake_words:
+            wl = w.lower()
+            # Add English/Russian variant for common patterns
+            if wl == "окей код":
+                wake_phrases.extend(["окей code", "okay code", "эй код", "хей код", "окей", "okay"])
+            elif wl == "hey code":
+                wake_phrases.extend(["hey code", "эй код", "хей код"])
+        wake_phrases = sorted(set(wake_phrases), key=len, reverse=True)
         cleaned = text
         for phrase in wake_phrases:
             cleaned = cleaned.replace(phrase, "").strip()
@@ -241,13 +248,18 @@ class IntentParser:
     }
 
     def __init__(self, parser_type: str = "regex", confidence_threshold: float = 0.7,
-                 language: str = "auto"):
+                 language: str = "auto", wake_words: list[str] | None = None):
         self.parser_type = parser_type
-        self.regex_parser = RegexIntentParser(confidence_threshold, language=language)
+        self.regex_parser = RegexIntentParser(confidence_threshold, language=language,
+                                              wake_words=wake_words)
 
     def set_language(self, lang: str):
         """Set language for intent parsing."""
         self.regex_parser.set_language(lang)
+
+    def set_wake_words(self, wake_words: list[str]):
+        """Update wake words for stripping."""
+        self.regex_parser._wake_words = wake_words
 
     def parse(self, text: str) -> ParsedCommand:
         """Parse transcribed text into a command."""

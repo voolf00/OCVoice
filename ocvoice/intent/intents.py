@@ -388,9 +388,5 @@ END_PHRASES_RU = [
 ]
 
 END_PHRASES_EN = [
-    "send", "go",
-]
-
-END_PHRASES_EN = [
     "send", "go", "done",
 ]

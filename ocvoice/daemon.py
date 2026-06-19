@@ -306,6 +306,7 @@ class VoiceDaemon:
             parser_type=self.config.intent_parser,
             confidence_threshold=self.config.intent_confidence_threshold,
             language=self._language,
+            wake_words=self.config.wake_words,
         )
 
         # ── UI: macOS → menu bar, Linux/Windows → system tray ──
@@ -610,10 +611,8 @@ class VoiceDaemon:
         if len(full_text) > len(getattr(self, '_cmd_longest', '')):
             self._cmd_longest = full_text
 
-        # Ищем end phrase в полном тексте (стандартные + Vosk-специфичные)
-        from .intent.intents import END_PHRASES_RU, END_PHRASES_EN
-        vosk_eps = ["отправь", "отправ", "отправи"]
-        all_eps = list(END_PHRASES_RU) + list(END_PHRASES_EN) + vosk_eps
+        # Ищем end phrase в полном тексте (из конфига + Vosk-специфичные)
+        all_eps = list(self.config.send_phrases) + ["отправь", "отправ", "отправи"]
         for ep in sorted(all_eps, key=len, reverse=True):
             ep_c = re.sub(r'[^\w\s]', '', ep.lower())
             if f" {ep_c} " in f" {full_clean} " or full_clean.endswith(f" {ep_c}"):
@@ -685,7 +684,8 @@ class VoiceDaemon:
     def _execute_command_from_text(self, text: str):
         """Execute a command from transcribed text (CMD path)."""
         from .intent.parser import IntentParser
-        parser = IntentParser(parser_type=self.config.intent_parser)
+        parser = IntentParser(parser_type=self.config.intent_parser,
+                              wake_words=self.config.wake_words)
         cmd = parser.parse(text)
         print(f"[OCVoice] 🔍 Parser ({self.config.intent_parser}): \"{text}\" → {cmd.intent.name} conf={cmd.confidence}", flush=True)
         if cmd.intent != Intent.SEND_MESSAGE and cmd.intent != Intent.UNKNOWN:
@@ -844,8 +844,7 @@ class VoiceDaemon:
                 return
 
             # ── End phrase check ──
-            from .intent.intents import END_PHRASES_RU, END_PHRASES_EN
-            
+
             # Quick pre-check: if it's a direct command (not a message), allow immediately
             quick_intent = self.parser.parse(text)
             if quick_intent.intent in (Intent.STOP_LISTENING, Intent.START_LISTENING,
@@ -856,7 +855,7 @@ class VoiceDaemon:
                 pass  # Commands execute immediately, no end phrase needed
             else:
                 # For send_message: require end phrase
-                all_end_phrases = END_PHRASES_RU + END_PHRASES_EN
+                all_end_phrases = self.config.send_phrases
                 end_found = False
 
                 # Phase 1: Exact match (preferred)

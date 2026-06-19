@@ -37,6 +37,7 @@ wake_sensitivity = 0.5
 silence_timeout = 2.0
 max_duration = 10.0
 language = "ru"
+send_phrases = ["отправь", "отправляй", "отправить", "send", "go", "done"]
 
 [speech.stt]
 backend = "auto"
@@ -240,6 +241,9 @@ class Config:
 
     @property
     def language(self) -> str: return self.get("voice", "language", default="ru")
+
+    @property
+    def send_phrases(self) -> list: return self.get("voice", "send_phrases", default=["отправь", "отправляй", "отправить", "send", "go", "done"])
 
     @property
     def stt_backend(self) -> str: return self.get("speech", "stt", "backend", default="auto")

@@ -25,6 +25,8 @@ max_duration = 2.0
 # Speech recognition language: "ru" | "en" | "cn" | "de" | "fr" | "es" | "it" | "pt" | "nl" | "pl" | "ja" | "ko" | "tr" | "vn" | "hi" | "uk" | "kz" | "auto"
 # "auto" = Whisper auto-detects, no Vosk streaming (slower)
 language = "ru"
+# End/send phrases — user says one of these to trigger sending the message
+send_phrases = ["отправь", "отправляй", "отправить", "send", "go", "done"]
 
 [speech.stt]
 # Speech-to-text backend: "local" | "api" | "auto"
