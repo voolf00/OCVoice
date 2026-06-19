@@ -227,6 +227,25 @@ class SettingsWindow:
         )
         self.mode_menu.pack(anchor="w", pady=(4, 10))
 
+        # Audio device
+        ctk.CTkLabel(scroll, text="🎤 Audio Device", anchor="w",
+                      font=ctk.CTkFont(size=14, weight="bold")).pack(fill="x", pady=(10, 0))
+        ctk.CTkLabel(scroll, text="Select microphone for voice input.",
+                      anchor="w", font=ctk.CTkFont(size=11)).pack(fill="x")
+        device_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        device_frame.pack(fill="x", pady=(4, 10))
+        self._devices = self._get_audio_devices()
+        device_labels = [d["label"] for d in self._devices]
+        self.device_var = ctk.StringVar(value="")
+        self.device_menu = ctk.CTkOptionMenu(
+            device_frame, values=device_labels if device_labels else ["No devices found"],
+            variable=self.device_var,
+            width=350, font=ctk.CTkFont(size=12),
+        )
+        self.device_menu.pack(side="left", fill="x", expand=True)
+        if not device_labels:
+            self.device_menu.configure(state="disabled")
+
         # Speaker verification toggle
         ctk.CTkLabel(scroll, text="🔒 Speaker Verification", anchor="w",
                       font=ctk.CTkFont(size=14, weight="bold")).pack(fill="x", pady=(10, 0))
@@ -269,6 +288,20 @@ class SettingsWindow:
             height=38,
         ).pack(side="right", padx=(5, 0))
 
+    @staticmethod
+    def _get_audio_devices() -> list[dict]:
+        """Return list of input audio devices with id, name, label."""
+        import sounddevice as sd
+        devices = []
+        try:
+            for d in sd.query_devices():
+                if d["max_input_channels"] > 0:
+                    label = f'{d["index"]}: {d["name"]}'
+                    devices.append({"id": d["index"], "name": d["name"], "label": label})
+        except Exception:
+            pass
+        return devices
+
     def _on_timeout_change(self, val):
         self.timeout_label.configure(text=f"{val:.1f}s")
 
@@ -293,6 +326,17 @@ class SettingsWindow:
         mode = voice.get("mode", "wake_word")
         self.mode_var.set(mode)
 
+        # Audio device
+        device_id = self.cfg.get("audio", {}).get("device_id", 1)
+        for d in self._devices:
+            if d["id"] == device_id:
+                self.device_var.set(d["label"])
+                break
+        else:
+            self.device_var.set(f"{device_id}: (current device)")
+            if self._devices:
+                self.device_menu.configure(values=[f"{device_id}: (current device)"] + [d["label"] for d in self._devices])
+
         speaker = self.cfg.get("speech", {}).get("speaker", {}).get("enabled", True)
         self.speaker_var.set(speaker)
 
@@ -307,6 +351,13 @@ class SettingsWindow:
         voice["language"] = self._lang_code
         voice["wake_sensitivity"] = round(self.sens_slider.get(), 1)
         voice["mode"] = self.mode_var.get()
+
+        # Audio device: map label back to ID
+        selected_label = self.device_var.get()
+        for d in self._devices:
+            if d["label"] == selected_label:
+                self.cfg.setdefault("audio", {})["device_id"] = d["id"]
+                break
 
         speech = self.cfg.setdefault("speech", {})
         sp = speech.setdefault("speaker", {})
