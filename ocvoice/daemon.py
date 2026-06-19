@@ -1318,6 +1318,22 @@ class VoiceDaemon:
             self._recheck_ide_server()
         elif c == 'new_session':
             self._on_tray_new_session()
+        elif c == 'reload_config':
+            print(f"[OCVoice] 🔄 Перезагрузка конфига...", flush=True)
+            self.config = __import__('ocvoice.config', fromlist=['Config']).Config()
+            self._language = self.config.language
+            self.parser.set_language(self._language)
+            self.parser.set_wake_words(self.config.wake_words)
+            if self._vosk:
+                self._vosk.set_lang(self._language)
+            if self.stt:
+                self.stt.set_language(self._language)
+            # Reset voice mode etc.
+            self._cmd_mode = False
+            if self._vosk:
+                self._vosk.reset()
+            self._set_state("waiting")
+            print(f"[OCVoice] ✅ Конфиг перезагружен", flush=True)
 
     def _update_ui_menu(self):
         """Fetch current data and push to tray or menubar."""

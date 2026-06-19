@@ -241,16 +241,16 @@ class TrayIcon:
         return pystray.Menu(
             pystray.MenuItem(
                 f"🎤 Wake: {wake[:30]}" if exists else "🎤 Wake words",
-                lambda *_: self._open_config(),
+                lambda *_: __import__('ocvoice.ui.settings_window', fromlist=['open_settings_window']).open_settings_window(),
             ),
             pystray.MenuItem(
                 f"✉️ Send: {send[:30]}" if exists else "✉️ Send phrases",
-                lambda *_: self._open_config(),
+                lambda *_: __import__('ocvoice.ui.settings_window', fromlist=['open_settings_window']).open_settings_window(),
             ),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(
                 "📝 Edit config file" if exists else "📝 Create config",
-                lambda *_: self._open_config(),
+                lambda *_: __import__('ocvoice.ui.settings_window', fromlist=['open_settings_window']).open_settings_window(),
             ),
         )
 
@@ -281,12 +281,8 @@ class TrayIcon:
             cb(False)
 
     def _action_settings(self, icon, item):
-        config_path = Path.home() / ".config" / "ocvoice" / "config.toml"
-        if config_path.exists():
-            import webbrowser
-            webbrowser.open(str(config_path))
-        else:
-            self.notify("Settings", "Config file not found")
+        from .settings_window import open_settings_window
+        open_settings_window()
 
     def _action_exit(self, icon, item):
         cb = self._callbacks.get('on_exit')

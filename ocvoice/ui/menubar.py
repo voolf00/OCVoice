@@ -212,11 +212,8 @@ class OCVoiceMenuBar(rumps.App if HAS_RUMPS else object):
         self.title = "🔴"
 
     def _action_settings(self, sender):
-        config_path = __import__('pathlib').Path.home() / ".config" / "ocvoice" / "config.toml"
-        if config_path.exists():
-            __import__('webbrowser').open(str(config_path))
-        else:
-            rumps.notification("OCVoice", "Settings", "Config file not found")
+        from .settings_window import open_settings_window
+        open_settings_window()
 
     def _action_status(self, sender):
         rumps.notification(
