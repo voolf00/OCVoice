@@ -75,7 +75,6 @@ class VoiceDaemon:
         self._vad_cmd_buffer = np.array([], dtype=np.float32)
         self._state = ""
         self._state_since = 0
-        self._last_title_update = 0.0
         self._state_session_id: Optional[str] = None
         self._session_timestamps: dict[str, float] = {}
         self._manual_session_until = 0.0
@@ -89,32 +88,26 @@ class VoiceDaemon:
 
     def _set_state(self, state: str):
         """Update all state indicators: session title, dock badge, state file.
-        
-        States: waiting, recording, cmd, sending, ready, stopped
+
+        States: waiting, cmd, awaiting, stopped
         """
-        if state == self._state:
-            return
         self._state = state
         self._state_since = time.time()
 
         state_map = {
             "waiting":   ("🟢", "ожидает"),
-            "recording": ("🟡", "слушает"),
             "cmd":       ("🔵", "команда"),
-            "sending":   ("🔵", "отправка"),
             "awaiting":  ("🟣", "ответ..."),
-            "ready":     ("✅", "готов"),
             "stopped":   ("🔴", "выкл"),
         }
         icon, label = state_map.get(state, ("⚪", "?"))
         dock_label = icon
 
         # 1. Обновить сессию-индикатор (видна во всех проектах)
-        if self.client and self._state_session_id and time.time() - self._last_title_update > 1:
+        if self.client and self._state_session_id:
             try:
                 title = f"{icon} [OCVoice] {label}"
                 self.client.update_session(title=title, session_id=self._state_session_id)
-                self._last_title_update = time.time()
             except Exception:
                 pass
 
@@ -451,7 +444,7 @@ class VoiceDaemon:
                     self._set_state(self._state)
                     # Safety: если "awaiting" висит больше 20с → сброс
                     if self._state == "awaiting" and time.time() - self._state_since > 20:
-                        self._set_state("ready")
+                        self._set_state("waiting")
                     print(f"[OCVoice] Heartbeat: listening={self._listening}, "
                           f"model={self._current_model.split('/')[-1]}, agent={self._current_agent}",
                           file=sys.stderr, flush=True)
@@ -639,7 +632,7 @@ class VoiceDaemon:
             self._cmd_text = ""
             self._vosk.reset()
             if full_clean.strip():
-                self._set_state("sending")
+                self._set_state("awaiting")
                 self._beep(800, 0.1)
                 threading.Thread(target=self._execute_command_from_text, args=(full_clean,), daemon=True).start()
             else:
@@ -678,7 +671,7 @@ class VoiceDaemon:
         try:
             self.client.send_prompt_async(text)
             print(f"[OCVoice] ✅ Отправлено асинхронно", flush=True)
-            self._set_state("ready")
+            self._set_state("waiting")
             self._beep(1200, 0.08)
         except Exception as e:
             print(f"[OCVoice] ❌ Ошибка async: {e}", flush=True)
@@ -1590,7 +1583,7 @@ class VoiceDaemon:
             return
 
         try:
-            self._set_state("sending")
+            self._set_state("awaiting")
             response = self.client.send_message(text=text)
             response_text = self._extract_response_text(response)
             if response_text:
@@ -1598,14 +1591,15 @@ class VoiceDaemon:
                 for line in response_text[:600].split('\n'):
                     print(f"  │ {line}", flush=True)
                 self._show_response(response_text)
-                self._set_state("ready")
             else:
                 print(f"  ⚠️ Пустой ответ от модели", flush=True)
 
             if response_text and self.config.tts_enabled:
                 self._speak_response(response_text)
+            self._set_state("waiting")
         except Exception as e:
             print(f"  ❌ Ошибка отправки: {e}", flush=True)
+            self._set_state("waiting")
         finally:
             print(f"{'─'*50}\n", flush=True)
 
