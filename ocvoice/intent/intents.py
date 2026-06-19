@@ -16,6 +16,7 @@ class Intent(str, Enum):
     CONTINUE_SESSION = "continue_session"
     LIST_SESSIONS = "list_sessions"
     SWITCH_SESSION = "switch_session"
+    SELECT_LAST_SESSION = "select_last_session"
 
     # Project management
     SWITCH_PROJECT = "switch_project"
@@ -86,6 +87,13 @@ INTENT_PATTERNS_RU = [
         r"используй\s+сессию\s+(.+)",
         r"выбери\s+сессию\s+(.+)",
         r"открой\s+сессию\s+(.+)",
+    ]),
+    (Intent.SELECT_LAST_SESSION, [
+        r"последняя\s+сессия",
+        r"свежая\s+сессия",
+        r"вернись\s+(?:к\s+)?последней",
+        r"вернись\s+назад",
+        r"последний\s+чат",
     ]),
     (Intent.CURRENT_SESSION, [
         r"какая\s+сессия",
@@ -255,6 +263,13 @@ INTENT_PATTERNS_EN = [
         r"work\s+(?:with|on)\s+session\s+(.+)",
         r"use\s+session\s+(.+)",
         r"open\s+session\s+(.+)",
+    ]),
+    (Intent.SELECT_LAST_SESSION, [
+        r"last\s+session",
+        r"latest\s+session",
+        r"most\s+recent",
+        r"go\s+back",
+        r"go\s+back\s+to\s+last",
     ]),
     (Intent.CURRENT_SESSION, [
         r"what\s+session",

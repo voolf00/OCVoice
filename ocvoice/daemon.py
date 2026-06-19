@@ -4,6 +4,7 @@ Orchestrates the full pipeline:
   Audio → VAD → Wake Word → STT → Speaker Verify → Intent → OpenCode API
 """
 
+import difflib
 import json
 import os
 import signal
@@ -1018,14 +1019,39 @@ class VoiceDaemon:
 
                 case Intent.SWITCH_PROJECT:
                     self._ensure_connected()
-                    try:
-                        proj = self.client.get_current_project()
-                        name = proj.get('worktree', '?').split('/')[-1] or proj.get('id', '?')
-                        print(f"  📁 Текущий проект: {name}", flush=True)
-                        print(f"  💡 Переключи проект мышкой в OpenCode IDE,", flush=True)
-                        print(f"     затем скажи 'найди сервер' для переподключения", flush=True)
-                    except Exception as e:
-                        print(f"[OCVoice] ❌ Ошибка: {e}", flush=True)
+                    query = command.arguments.get("project", command.text).strip().lower()
+                    all_projects = self._read_opencode_db_projects()
+                    candidates = {}
+                    for p in all_projects:
+                        name = p.get('name', '').lower()
+                        if name:
+                            candidates[name] = p['worktree']
+                            candidates[name.lower()] = p['worktree']
+                        folder = p.get('worktree', '').rsplit('/', 1)[-1].lower()
+                        if folder and folder != name:
+                            candidates[folder] = p['worktree']
+                    if not candidates:
+                        print(f"[OCVoice] ❌ Нет проектов в БД", flush=True)
+                    else:
+                        # Try direct match
+                        match = difflib.get_close_matches(query, list(candidates.keys()), n=1, cutoff=0.4)
+                        # Try with Russian → Latin transliteration
+                        if not match:
+                            _ru_chars = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя"
+                            _en_chars = "abvgdeejziyklmnoprstufhccssyy'euya"
+                            _ru_to_en = dict(zip(_ru_chars, _en_chars))
+                            _ru_to_en['ё'] = 'yo'
+                            translit = ''.join(_ru_to_en.get(c, c) for c in query)
+                            if translit != query:
+                                match = difflib.get_close_matches(translit, list(candidates.keys()), n=1, cutoff=0.4)
+                        if match:
+                            wt = candidates[match[0]]
+                            proj_name = wt.rsplit('/', 1)[-1]
+                            print(f"[OCVoice] 📁 Проект: {proj_name}", flush=True)
+                            self._on_tray_select_project(wt)
+                        else:
+                            print(f"[OCVoice] ❌ Проект \"{query}\" не найден", flush=True)
+                            print(f"  Доступные проекты: {', '.join(sorted(candidates.keys()))}", flush=True)
 
                 case Intent.REDISCOVER:
                     print(f"[OCVoice] 🔍 Поиск сервера...", flush=True)
@@ -1125,20 +1151,38 @@ class VoiceDaemon:
                     sessions = self.client.list_sessions()
                     user_sessions = [s for s in sessions
                                      if '[OCVoice]' not in s.get('title', '')]
-                    matches = [s for s in user_sessions if query in s.get('title', '').lower()]
-                    if len(matches) == 1:
-                        self.client.session_id = matches[0]['id']
+                    titles = {s.get('title', '').lower()[:60]: s for s in user_sessions if s.get('title')}
+                    # Fuzzy match
+                    match = difflib.get_close_matches(query, list(titles.keys()), n=1, cutoff=0.4)
+                    if match:
+                        s = titles[match[0]]
+                        self.client.session_id = s['id']
                         self._manual_session_until = time.time() + 30
                         self._beep(880, 0.08)
-                        print(f"  ✅ Сессия: {matches[0]['title']} ({matches[0]['id'][:16]}...)", flush=True)
-                    elif len(matches) > 1:
-                        print(f"[OCVoice] Найдено несколько сессий:", flush=True)
-                        for i, s in enumerate(matches, 1):
-                            print(f"  {i}. {s['title']} ({s['id'][:8]}...)", flush=True)
-                        print("  Уточни название", flush=True)
+                        print(f"  ✅ Сессия: {s['title']} ({s['id'][:16]}...)", flush=True)
                     else:
-                        print(f"[OCVoice] Сессия \"{query}\" не найдена", flush=True)
-                        print("  Скажи: список сессий", flush=True)
+                        # Fallback: substring match
+                        matches = [s for s in user_sessions if query in s.get('title', '').lower()]
+                        if len(matches) == 1:
+                            s = matches[0]
+                            self.client.session_id = s['id']
+                            self._manual_session_until = time.time() + 30
+                            self._beep(880, 0.08)
+                            print(f"  ✅ Сессия: {s['title']} ({s['id'][:16]}...)", flush=True)
+                        elif len(matches) > 1:
+                            print(f"[OCVoice] Найдено несколько сессий:", flush=True)
+                            for i, s in enumerate(matches, 1):
+                                print(f"  {i}. {s['title']} ({s['id'][:8]}...)", flush=True)
+                            print("  Уточни название", flush=True)
+                        else:
+                            print(f"[OCVoice] ❌ Сессия \"{query}\" не найдена", flush=True)
+                            print("  Доступные: " + ", ".join(sorted(titles.keys())[:5]) + "...", flush=True)
+
+                case Intent.SELECT_LAST_SESSION:
+                    self._ensure_connected()
+                    self._manual_session_until = 0
+                    self._select_user_session()
+                    print(f"[OCVoice] ✅ Возврат к последней сессии", flush=True)
 
                 case Intent.EXECUTE_COMMAND:
                     self._ensure_connected()

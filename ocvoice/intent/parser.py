@@ -219,6 +219,7 @@ class IntentParser:
         Intent.SWITCH_SESSION: ["session"],
         Intent.EXECUTE_COMMAND: ["command"],
         Intent.RUN_SHELL: ["command"],
+        Intent.SELECT_LAST_SESSION: [],
     }
 
     KNOWN_MODELS = {
