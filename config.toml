@@ -22,6 +22,9 @@ wake_sensitivity = 0.5
 silence_timeout = 0.8
 # Maximum recording duration in seconds (safety limit)
 max_duration = 2.0
+# Speech recognition language: "ru" | "en" | "cn" | "de" | "fr" | "es" | "it" | "pt" | "nl" | "pl" | "ja" | "ko" | "tr" | "vn" | "hi" | "uk" | "kz" | "auto"
+# "auto" = Whisper auto-detects, no Vosk streaming (slower)
+language = "ru"
 
 [speech.stt]
 # Speech-to-text backend: "local" | "api" | "auto"

@@ -41,6 +41,7 @@ class TrayIcon:
         self._current_project_name: str = ""
         self._server_url: str = ""
         self._all_projects: list[dict] = []
+        self._language: str = "ru"
 
     def start(self):
         if not _HAS_PYSTRAY:
@@ -83,7 +84,8 @@ class TrayIcon:
 
     def update_menu(self, sessions: list[dict], projects: list[dict],
                     current_session_id: str, current_project_name: str,
-                    server_url: str, all_projects: list[dict] = None):
+                    server_url: str, all_projects: list[dict] = None,
+                    language: str = ""):
         if not self._icon:
             return
         self._sessions = sessions
@@ -92,6 +94,8 @@ class TrayIcon:
         self._current_project_name = current_project_name
         self._server_url = server_url
         self._all_projects = all_projects or []
+        if language:
+            self._language = language
         try:
             self._icon.menu = self._build_menu()
             self._icon.update_menu()
@@ -133,6 +137,7 @@ class TrayIcon:
             pystray.MenuItem("🎤 Start", self._action_start),
             pystray.MenuItem("🔇 Stop", self._action_stop),
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem("🔤 Language", self._build_language_menu()),
             pystray.MenuItem("⚙️ Settings", self._action_settings),
             pystray.MenuItem("❌ Exit", self._action_exit),
         )
@@ -189,6 +194,21 @@ class TrayIcon:
         items.append(pystray.MenuItem("🔄 Find Server", lambda: find_cb(None) if find_cb else None))
         return pystray.Menu(*items)
 
+    def _build_language_menu(self):
+        from ..speech.vosk_stt import LANGUAGE_ORDER, LANGUAGE_NAMES
+        items = []
+        cb = self._callbacks.get('on_language_switch')
+        for code in LANGUAGE_ORDER:
+            label = LANGUAGE_NAMES.get(code, code)
+            mark = "✓ " if code == self._language else "  "
+            items.append(
+                pystray.MenuItem(
+                    f"{mark}{label}",
+                    lambda _code=code, _cb=cb: _cb(_code) if _cb else None,
+                )
+            )
+        return pystray.Menu(*items)
+
     def _create_icon(self, status: str):
         try:
             from PIL import Image, ImageDraw
@@ -242,6 +262,7 @@ class TrayManager:
 
     def start(self, on_toggle=None, on_exit=None,
               on_select_session=None, on_select_project=None,
+              on_language_switch=None,
               on_find_server=None,
               on_new_session=None):
         if not _HAS_PYSTRAY:
@@ -251,6 +272,7 @@ class TrayManager:
             'on_exit': on_exit,
             'on_select_session': on_select_session,
             'on_select_project': on_select_project,
+            'on_language_switch': on_language_switch,
             'on_find_server': on_find_server,
             'on_new_session': on_new_session,
         }
@@ -259,7 +281,8 @@ class TrayManager:
 
     def update_menu(self, sessions=None, projects=None,
                     current_session_id="", current_project_name="",
-                    server_url="", all_projects=None):
+                    server_url="", all_projects=None,
+                    language=""):
         if self.tray:
             self.tray.update_menu(
                 sessions or [],
@@ -268,6 +291,7 @@ class TrayManager:
                 current_project_name or "",
                 server_url or "",
                 all_projects or [],
+                language or "",
             )
 
     def update(self, status: str):

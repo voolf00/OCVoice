@@ -74,6 +74,53 @@ if not exist "%USERPROFILE%\.config\ocvoice\config.toml" (
     echo [OK] Default config created
 )
 
+:: Language selection
+echo.
+echo Select your language / Выберите язык:
+echo  1) Russian / Русский        (ru)
+echo  2) Chinese / 中文            (cn)
+echo  3) English / English         (en)
+echo  4) German / Deutsch          (de)
+echo  5) French / Français         (fr)
+echo  6) Spanish / Español         (es)
+echo  7) Italian / Italiano        (it)
+echo  8) Japanese / 日本語          (ja)
+echo  9) Korean / 한국어           (ko)
+echo  10) Dutch / Nederlands       (nl)
+echo  11) Polish / Polski          (pl)
+echo  12) Portuguese / Português   (pt)
+echo  13) Turkish / Türkçe         (tr)
+echo  14) Vietnamese / Tiếng Việt  (vn)
+echo  15) Hindi / हिन्दी           (hi)
+echo  16) Ukrainian / Українська   (uk)
+echo  17) Kazakh / Қазақша         (kz)
+echo  18) Auto / Whisper           (auto)
+set /p LANG_CHOICE="  > "
+if "%LANG_CHOICE%"=="" set LANG_CHOICE=1
+if "%LANG_CHOICE%"=="1" set LANG_CODE=ru
+if "%LANG_CHOICE%"=="2" set LANG_CODE=cn
+if "%LANG_CHOICE%"=="3" set LANG_CODE=en
+if "%LANG_CHOICE%"=="4" set LANG_CODE=de
+if "%LANG_CHOICE%"=="5" set LANG_CODE=fr
+if "%LANG_CHOICE%"=="6" set LANG_CODE=es
+if "%LANG_CHOICE%"=="7" set LANG_CODE=it
+if "%LANG_CHOICE%"=="8" set LANG_CODE=ja
+if "%LANG_CHOICE%"=="9" set LANG_CODE=ko
+if "%LANG_CHOICE%"=="10" set LANG_CODE=nl
+if "%LANG_CHOICE%"=="11" set LANG_CODE=pl
+if "%LANG_CHOICE%"=="12" set LANG_CODE=pt
+if "%LANG_CHOICE%"=="13" set LANG_CODE=tr
+if "%LANG_CHOICE%"=="14" set LANG_CODE=vn
+if "%LANG_CHOICE%"=="15" set LANG_CODE=hi
+if "%LANG_CHOICE%"=="16" set LANG_CODE=uk
+if "%LANG_CHOICE%"=="17" set LANG_CODE=kz
+if "%LANG_CHOICE%"=="18" set LANG_CODE=auto
+if not defined LANG_CODE set LANG_CODE=ru
+
+:: Write language to config
+powershell -Command "(Get-Content '%USERPROFILE%\.config\ocvoice\config.toml') -replace 'language = \"ru\"', 'language = \"%LANG_CODE%\"' | Set-Content '%USERPROFILE%\.config\ocvoice\config.toml'"
+echo [OK] Language set to: %LANG_CODE%
+
 :: Create launcher
 set LAUNCHER_DIR=%USERPROFILE%\.local\bin
 if not exist "%LAUNCHER_DIR%" mkdir "%LAUNCHER_DIR%"
@@ -93,13 +140,15 @@ if errorlevel 1 (
 
 :: Download Vosk model
 echo [*] Downloading speech recognition model...
-"%VENV_DIR%\Scripts\python.exe" -c "from ocvoice.speech.vosk_stt import VoskSTT; VoskSTT(lang='ru')" >nul 2>&1
-if errorlevel 1 (
-    echo [WARN] Vosk model download failed. Download manually:
-    echo   https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip
-    echo   Extract to: %USERPROFILE%\.cache\ocvoice\vosk\
+if not "%LANG_CODE%"=="auto" (
+    "%VENV_DIR%\Scripts\python.exe" -c "from ocvoice.speech.vosk_stt import VoskSTT; VoskSTT(lang='%LANG_CODE%')" >nul 2>&1
+    if errorlevel 1 (
+        echo [WARN] Vosk model download failed. It will download on first start.
+    ) else (
+        echo [OK] Speech model downloaded
+    )
 ) else (
-    echo [OK] Speech model downloaded
+    echo [OK] Auto mode — no Vosk model needed (Whisper only)
 )
 
 :: Done

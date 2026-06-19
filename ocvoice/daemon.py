@@ -80,6 +80,7 @@ class VoiceDaemon:
         self._session_timestamps: dict[str, float] = {}
         self._manual_session_until = 0.0
         self._selected_project_worktree: str = ""
+        self._language: str = config.language
 
     def _notify(self, title: str, text: str):
         """Send desktop notification + always print to stderr for logs."""
@@ -272,7 +273,7 @@ class VoiceDaemon:
         # ── Vosk streaming STT ──
         try:
             from .speech.vosk_stt import VoskSTT
-            self._vosk = VoskSTT(lang="ru")
+            self._vosk = VoskSTT(lang=self._language)
             print(f"[OCVoice] Vosk STT ready (lang=ru)")
         except Exception as e:
             print(f"[OCVoice] Vosk init error: {e}")
@@ -297,6 +298,7 @@ class VoiceDaemon:
         self.parser = IntentParser(
             parser_type=self.config.intent_parser,
             confidence_threshold=self.config.intent_confidence_threshold,
+            language=self._language,
         )
 
         # ── UI: macOS → menu bar, Linux/Windows → system tray ──
@@ -310,6 +312,7 @@ class VoiceDaemon:
                     on_quit=self._on_menubar_quit,
                     on_select_session=self._on_tray_select_session,
                     on_select_project=self._on_tray_select_project,
+                    on_language_switch=self._on_language_switch,
                     on_find_server=self._on_tray_find_server,
                     on_new_session=self._on_tray_new_session,
                 )
@@ -325,6 +328,7 @@ class VoiceDaemon:
                     on_exit=self._on_tray_exit,
                     on_select_session=self._on_tray_select_session,
                     on_select_project=self._on_tray_select_project,
+                    on_language_switch=self._on_language_switch,
                     on_find_server=self._on_tray_find_server,
                     on_new_session=self._on_tray_new_session,
                 )
@@ -1319,6 +1323,7 @@ class VoiceDaemon:
             current_project_name=self._extract_project_name(current_project),
             server_url=str(self.client.client.base_url) if self.client else "",
             all_projects=all_projects,
+            language=self._language,
         )
         if self.menubar:
             self.menubar.update_menu(**kwargs)
@@ -1838,6 +1843,42 @@ class VoiceDaemon:
 
         self._update_ui_menu()
         self._beep(660, 0.1)
+
+    def _on_language_switch(self, lang: str):
+        """Handle language switch from tray/menubar menu."""
+        if lang == self._language:
+            return
+        from .speech.vosk_stt import LANGUAGE_NAMES
+        name = LANGUAGE_NAMES.get(lang, lang)
+        print(f"[OCVoice] 🔤 Язык: {name}", flush=True)
+        self._language = lang
+
+        # Save to config
+        try:
+            self.config.set("voice", "language", value=lang)
+        except Exception:
+            pass
+
+        # Update Vosk model
+        if self._vosk:
+            try:
+                self._vosk.set_lang(lang)
+            except Exception as e:
+                print(f"[OCVoice] Vosk model switch failed: {e}", flush=True)
+
+        # Update parser
+        self.parser.set_language(lang)
+
+        # Update STT
+        if self.stt:
+            self.stt.set_language(lang)
+
+        self._update_ui_menu()
+        self._beep(660, 0.1)
+
+    def _get_language_code(self) -> str:
+        """Return current language code for UI."""
+        return self._language
 
     @staticmethod
     def print_status():

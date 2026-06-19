@@ -48,6 +48,7 @@ class LocalSTT:
         model_size: str = "base",
         device: str = "cpu",
         compute_type: str = "default",
+        language: str = "auto",
     ):
         if not HAS_FASTER_WHISPER:
             raise RuntimeError(
@@ -58,9 +59,14 @@ class LocalSTT:
         self.model_size = model_size
         self.device = device
         self.compute_type = compute_type
+        self.language = language
 
         self._model: Optional[WhisperModel] = None
         self._model_name = MODEL_SIZES.get(model_size, model_size)
+
+    def set_language(self, lang: str):
+        """Update language for transcription."""
+        self.language = lang
 
     def _ensure_model(self):
         """Lazy-load the Whisper model."""
@@ -99,7 +105,7 @@ class LocalSTT:
         segments, info = self._model.transcribe(
             audio,
             beam_size=5,
-            language=None,  # auto-detect
+            language=None if self.language == "auto" else self.language,
             vad_filter=True,
             vad_parameters={"threshold": 0.5},
         )
@@ -232,6 +238,11 @@ class SpeechToText:
         if self._api is None:
             self._api = API_STT(api_key=self._api_key)
         return self._api
+
+    def set_language(self, lang: str):
+        """Set the language for STT backends."""
+        if self._local:
+            self._local.set_language(lang)
 
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> dict:
         """Transcribe audio to text.

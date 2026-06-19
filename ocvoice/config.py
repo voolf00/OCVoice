@@ -36,6 +36,7 @@ wake_words = ["окей код", "hey code"]
 wake_sensitivity = 0.5
 silence_timeout = 2.0
 max_duration = 10.0
+language = "ru"
 
 [speech.stt]
 backend = "auto"
@@ -177,6 +178,38 @@ class Config:
                 return default
         return d
 
+    def set(self, *keys, value):
+        """Set a nested config value and save to user config file."""
+        d = self._data
+        for key in keys[:-1]:
+            if key not in d or not isinstance(d[key], dict):
+                d[key] = {}
+            d = d[key]
+        d[keys[-1]] = value
+        self._save()
+
+    def _save(self):
+        """Write current config to user config file."""
+        USER_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        lines = []
+        for section, values in self._data.items():
+            if isinstance(values, dict):
+                lines.append(f"[{section}]")
+                for key, val in values.items():
+                    if isinstance(val, dict):
+                        continue
+                    if isinstance(val, str):
+                        lines.append(f'{key} = "{val}"')
+                    elif isinstance(val, bool):
+                        lines.append(f'{key} = {"true" if val else "false"}')
+                    elif isinstance(val, list):
+                        items = ", ".join(f'"{v}"' for v in val)
+                        lines.append(f'{key} = [{items}]')
+                    else:
+                        lines.append(f'{key} = {val}')
+                lines.append("")
+        USER_CONFIG_PATH.write_text("\n".join(lines))
+
     # Convenience properties
     @property
     def audio_device(self) -> int: return self.get("audio", "device_id", default=1)
@@ -204,6 +237,9 @@ class Config:
 
     @property
     def max_duration(self) -> float: return self.get("voice", "max_duration", default=15.0)
+
+    @property
+    def language(self) -> str: return self.get("voice", "language", default="ru")
 
     @property
     def stt_backend(self) -> str: return self.get("speech", "stt", "backend", default="auto")

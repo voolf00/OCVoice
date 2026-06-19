@@ -62,6 +62,45 @@ if [ ! -f "$HOME/.config/ocvoice/config.toml" ]; then
     echo -e "${GREEN}[✓]${NC} Default config created at ~/.config/ocvoice/config.toml"
 fi
 
+# Language selection
+echo ""
+echo -e "${YELLOW}Select your language / Выберите язык:${NC}"
+echo "  1) 🇷🇺 Русский        (ru)"
+echo "  2) 🇨🇳 中文            (cn)"
+echo "  3) 🇬🇧 English         (en)"
+echo "  4) 🇩🇪 Deutsch         (de)"
+echo "  5) 🇫🇷 Français        (fr)"
+echo "  6) 🇪🇸 Español         (es)"
+echo "  7) 🇮🇹 Italiano        (it)"
+echo "  8) 🇯🇵 日本語          (ja)"
+echo "  9) 🇰🇷 한국어          (ko)"
+echo "  10) 🇳🇱 Nederlands     (nl)"
+echo "  11) 🇵🇱 Polski         (pl)"
+echo "  12) 🇧🇷 Português      (pt)"
+echo "  13) 🇹🇷 Türkçe         (tr)"
+echo "  14) 🇻🇳 Tiếng Việt     (vn)"
+echo "  15) 🇮🇳 हिन्दी         (hi)"
+echo "  16) 🇺🇦 Українська     (uk)"
+echo "  17) 🇰🇿 Қазақша        (kz)"
+echo "  18) 🌐 Auto (Whisper)  (auto)"
+read -p "  > " LANG_CHOICE
+case "$LANG_CHOICE" in
+  1|"") LANG_CODE="ru" ;;  2) LANG_CODE="cn" ;;  3) LANG_CODE="en" ;;
+  4) LANG_CODE="de" ;;  5) LANG_CODE="fr" ;;  6) LANG_CODE="es" ;;
+  7) LANG_CODE="it" ;;  8) LANG_CODE="ja" ;;  9) LANG_CODE="ko" ;;
+  10) LANG_CODE="nl" ;;  11) LANG_CODE="pl" ;;  12) LANG_CODE="pt" ;;
+  13) LANG_CODE="tr" ;;  14) LANG_CODE="vn" ;;  15) LANG_CODE="hi" ;;
+  16) LANG_CODE="uk" ;;  17) LANG_CODE="kz" ;;  *) LANG_CODE="ru" ;;
+esac
+
+# Update config with language
+if [[ "$(uname)" == "Darwin" ]]; then
+    sed -i '' "s/language = \"ru\"/language = \"$LANG_CODE\"/" "$HOME/.config/ocvoice/config.toml"
+else
+    sed -i "s/language = \"ru\"/language = \"$LANG_CODE\"/" "$HOME/.config/ocvoice/config.toml"
+fi
+echo -e "${GREEN}[✓]${NC} Language set to: $LANG_CODE"
+
 # Create launcher script
 mkdir -p "$HOME/.local/bin"
 cat > "$HOME/.local/bin/ocvoice" << 'LAUNCHER'

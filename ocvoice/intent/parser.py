@@ -42,12 +42,17 @@ class ParsedCommand:
 class RegexIntentParser:
     """Rule-based intent parser using regex patterns."""
 
-    def __init__(self, confidence_threshold: float = 0.7):
+    def __init__(self, confidence_threshold: float = 0.7, language: str = "auto"):
         self.threshold = confidence_threshold
+        self._language = language
 
         # Compile all patterns
         self._patterns_ru = self._compile(INTENT_PATTERNS_RU)
         self._patterns_en = self._compile(INTENT_PATTERNS_EN)
+
+    def set_language(self, lang: str):
+        """Set language for pattern matching: ru, en, or auto."""
+        self._language = lang
 
     def _compile(self, patterns: list) -> list:
         """Compile regex patterns."""
@@ -112,8 +117,13 @@ class RegexIntentParser:
         best_match = None
         best_length = 0
 
-        # Try Russian patterns first, then English
-        for intent, pattern in self._patterns_ru + self._patterns_en:
+        patterns = []
+        if self._language in ("auto", "ru"):
+            patterns += self._patterns_ru
+        if self._language in ("auto", "en"):
+            patterns += self._patterns_en
+
+        for intent, pattern in patterns:
             match = pattern.search(text)
             if match:
                 match_length = len(match.group(0))
@@ -132,7 +142,11 @@ class RegexIntentParser:
 
     def _match_message_triggers(self, text: str) -> Optional[ParsedCommand]:
         """Check if text starts with a message trigger phrase."""
-        all_triggers = MESSAGE_TRIGGERS_RU + MESSAGE_TRIGGERS_EN
+        all_triggers = []
+        if self._language in ("auto", "ru"):
+            all_triggers += MESSAGE_TRIGGERS_RU
+        if self._language in ("auto", "en"):
+            all_triggers += MESSAGE_TRIGGERS_EN
 
         # Sort by length (longest first) to match more specific triggers
         for trigger in sorted(all_triggers, key=len, reverse=True):
@@ -226,9 +240,14 @@ class IntentParser:
         "deepseek": "deepseek/deepseek-chat",
     }
 
-    def __init__(self, parser_type: str = "regex", confidence_threshold: float = 0.7):
+    def __init__(self, parser_type: str = "regex", confidence_threshold: float = 0.7,
+                 language: str = "auto"):
         self.parser_type = parser_type
-        self.regex_parser = RegexIntentParser(confidence_threshold)
+        self.regex_parser = RegexIntentParser(confidence_threshold, language=language)
+
+    def set_language(self, lang: str):
+        """Set language for intent parsing."""
+        self.regex_parser.set_language(lang)
 
     def parse(self, text: str) -> ParsedCommand:
         """Parse transcribed text into a command."""
