@@ -1374,6 +1374,8 @@ class VoiceDaemon:
                 self._vosk.set_lang(self._language)
             if self.stt:
                 self.stt.set_language(self._language)
+            # Restart audio capture with new device
+            self._restart_audio_capture()
             # Reset voice mode etc.
             self._cmd_mode = False
             if self._vosk:
@@ -1945,6 +1947,31 @@ class VoiceDaemon:
         self._set_state("waiting")
         self._update_ui_menu()
         self._beep(660, 0.1)
+
+    def _restart_audio_capture(self):
+        """Restart audio capture with current config device."""
+        was_running = self.capture is not None and self.capture._running
+        try:
+            if self.capture:
+                self.capture.stop()
+        except Exception:
+            pass
+        try:
+            from .audio.capture import AudioCapture
+            device_id = self.config.audio_device
+            if device_id < 1:
+                device_id = AudioCapture.auto_detect_device()
+            self.capture = AudioCapture(
+                sample_rate=self.config.audio_sample_rate,
+                channels=self.config.audio_channels,
+                device_id=device_id,
+                chunk_size=self.config.audio_chunk_size,
+            )
+            if was_running:
+                self.capture.start()
+            print(f"[OCVoice] 🎤 Аудиоустройство: device_id={device_id}", flush=True)
+        except Exception as e:
+            print(f"[OCVoice] ❌ Ошибка перезапуска аудио: {e}", flush=True)
 
     def _on_language_switch(self, lang: str):
         """Handle language switch from tray/menubar menu."""
