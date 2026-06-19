@@ -1,27 +1,99 @@
-# OCVoice — Voice Control for OpenCode
+# OpenCode Voice (OCVoice)
 
-OCVoice is a voice assistant for OpenCode. It runs as a background daemon
-and connects to your OpenCode IDE via its API.
+Voice assistant for OpenCode. Background daemon with speech recognition,
+speaker verification, and full project/session management via voice or UI.
 
 ## How to use with this project
 
-The project is configured for voice control. When you work on it:
+```bash
+ocv start          # Start daemon (menubar/tray appears)
+ocv stop           # Stop daemon
+ocv enroll         # Record voice print for speaker verification
+ocv settings       # Open settings GUI (or via ⚙️ in menu)
+ocv select session # Pick session interactively
+ocv select project # Pick project interactively
+```
 
-1. Make sure OCVoice is running: `ocv start`
-2. Speak commands in Russian or English
-3. Messages appear in your IDE session
+Speak commands in **Russian** or **English**.
 
 ## Voice commands
 
-- `"окей код, [any message], отправь"` — send a message
-- `"окей код, новая сессия"` — create new session
-- `"окей код, plan mode"` / `"build mode"` — switch agents
-- `"окей код, стоп"` — pause listening
+| Command | Action |
+|---------|--------|
+| `"окей код, [message], отправь"` | Send message to IDE |
+| `"окей код, новая сессия"` | Create new session |
+| `"окей код, plan mode"` / `"build mode"` | Switch agent |
+| `"окей код, открой проект [name]"` | Switch project (fuzzy match) |
+| `"окей код, [session title]"` | Switch session |
+| `"окей код, последняя сессия"` | Back to most recent |
+| `"окей код, стоп"` | Pause listening |
+| `"окей код, найди сервер"` | Rediscover IDE |
 
 ## Architecture
 
-- Daemon runs in background, auto-discovers IDE server
-- Vosk streams speech in real-time (no 3s windows)
-- Speaker verification (Resemblyzer) filters non-user voices
-- Messages sent async to IDE via `/session/:id/prompt_async`
-- State shown in session title: 🟢 ожидает → 🔵 команда → ✅ ответ
+- **Daemon** runs in background, auto-discovers IDE server
+- **Vosk** streams speech in real-time (Vosk model per language)
+- **faster-whisper** fallback for accuracy
+- **Speaker verification** (Resemblyzer/SpeechBrain) filters non-user voices
+- **Projects** read from `opencode.global.dat` + SQLite `project` table
+- **Sessions** filtered per project via SQLite JOIN (`session` + `project`)
+- **Fuzzy matching** (difflib) + Russian→Latin transliteration for names
+- **Messages** sent async to IDE via `/session/:id/prompt_async`
+- **Settings** stored in `~/.config/ocvoice/config.toml` (or GUI via CustomTkinter)
+
+## UI
+
+- **macOS:** Menu bar (rumps) — 🎤 icon with project/session/language menus
+- **Linux/Windows:** System tray (pystray) — same functionality
+- **CLI:** `ocv select [session|project|status]` — interactive picker
+- **Settings:** CustomTkinter window — wake/send phrases, language, sensitivity, toggles
+
+## State indicators
+
+Session title and menubar/tray icon update automatically:
+
+```
+🟢 ожидает → 🔵 команда → 🟣 ответ... → 🟢 ожидает
+```
+
+Also in `~/.config/ocvoice/state.json`.
+
+## Config
+
+Key file: `~/.config/ocvoice/config.toml`
+
+```toml
+[voice]
+language = "ru"
+wake_words = ["окей код", "hey code"]
+send_phrases = ["отправь", "отправляй", "отправить", "send", "go", "done"]
+wake_sensitivity = 0.5
+silence_timeout = 0.8
+
+[speech.speaker]
+enabled = true
+threshold = 0.5
+
+[speech.stt]
+backend = "auto"
+
+[ui]
+menubar = true
+tray_enabled = false
+```
+
+## Key files
+
+- `ocvoice/daemon.py` — main loop, state management, voice command processing
+- `ocvoice/opencode/client.py` — OpenCode HTTP API client
+- `ocvoice/opencode/ide_discovery.py` — server port scanning
+- `ocvoice/speech/vosk_stt.py` — Vosk streaming (all language models)
+- `ocvoice/speech/speaker.py` — Resemblyzer/SpeechBrain verification
+- `ocvoice/intent/parser.py` — regex intent parser (RU/EN patterns)
+- `ocvoice/intent/intents.py` — intent definitions and patterns
+- `ocvoice/ui/menubar.py` — macOS menu bar
+- `ocvoice/ui/tray.py` — system tray
+- `ocvoice/ui/settings_window.py` — CustomTkinter settings GUI
+- `ocvoice/cli/select.py` — interactive project/session picker
+- `ocvoice/cli/ipc.py` — CLI↔daemon IPC via JSON file
+- `ocvoice/config.py` — config loader with save support
