@@ -180,6 +180,53 @@ class SettingsWindow:
         self.timeout_label = ctk.CTkLabel(timeout_frame, text="0.8s", width=40)
         self.timeout_label.pack(side="right", padx=(10, 0))
 
+        # Wake sensitivity
+        ctk.CTkLabel(scroll, text="🎤 Wake Sensitivity", anchor="w",
+                      font=ctk.CTkFont(size=14, weight="bold")).pack(fill="x", pady=(10, 0))
+        ctk.CTkLabel(scroll, text="Higher = detects even quiet voice. Lower = fewer false positives.",
+                      anchor="w", font=ctk.CTkFont(size=11)).pack(fill="x")
+        sens_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        sens_frame.pack(fill="x", pady=(4, 10))
+        ctk.CTkLabel(sens_frame, text="Low", font=ctk.CTkFont(size=11)).pack(side="left")
+        self.sens_slider = ctk.CTkSlider(
+            sens_frame, from_=0.1, to=1.0, number_of_steps=18,
+            command=lambda v: self.sens_label.configure(text=f"{v:.1f}"),
+        )
+        self.sens_slider.pack(side="left", fill="x", expand=True, padx=5)
+        ctk.CTkLabel(sens_frame, text="High", font=ctk.CTkFont(size=11)).pack(side="left")
+        self.sens_label = ctk.CTkLabel(sens_frame, text="0.5", width=30)
+        self.sens_label.pack(side="right", padx=(10, 0))
+
+        # Speaker threshold
+        ctk.CTkLabel(scroll, text="🔒 Speaker Threshold", anchor="w",
+                      font=ctk.CTkFont(size=14, weight="bold")).pack(fill="x", pady=(10, 0))
+        ctk.CTkLabel(scroll, text="Lower = more permissive (accepts quieter/imperfect voice matches).",
+                      anchor="w", font=ctk.CTkFont(size=11)).pack(fill="x")
+        thresh_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        thresh_frame.pack(fill="x", pady=(4, 10))
+        ctk.CTkLabel(thresh_frame, text="Permissive", font=ctk.CTkFont(size=11)).pack(side="left")
+        self.thresh_slider = ctk.CTkSlider(
+            thresh_frame, from_=0.1, to=1.0, number_of_steps=18,
+            command=lambda v: self.thresh_label.configure(text=f"{v:.1f}"),
+        )
+        self.thresh_slider.pack(side="left", fill="x", expand=True, padx=5)
+        ctk.CTkLabel(thresh_frame, text="Strict", font=ctk.CTkFont(size=11)).pack(side="left")
+        self.thresh_label = ctk.CTkLabel(thresh_frame, text="0.5", width=30)
+        self.thresh_label.pack(side="right", padx=(10, 0))
+
+        # Voice mode
+        ctk.CTkLabel(scroll, text="🎧 Voice Mode", anchor="w",
+                      font=ctk.CTkFont(size=14, weight="bold")).pack(fill="x", pady=(10, 0))
+        ctk.CTkLabel(scroll, text="wake_word = say wake word first. always_on = always listening.",
+                      anchor="w", font=ctk.CTkFont(size=11)).pack(fill="x")
+        self.mode_var = ctk.StringVar(value="wake_word")
+        self.mode_menu = ctk.CTkOptionMenu(
+            scroll, values=["wake_word", "always_on", "push_to_talk"],
+            variable=self.mode_var,
+            width=200, font=ctk.CTkFont(size=13),
+        )
+        self.mode_menu.pack(anchor="w", pady=(4, 10))
+
         # Speaker verification toggle
         ctk.CTkLabel(scroll, text="🔒 Speaker Verification", anchor="w",
                       font=ctk.CTkFont(size=14, weight="bold")).pack(fill="x", pady=(10, 0))
@@ -235,6 +282,17 @@ class SettingsWindow:
         self.timeout_slider.set(timeout)
         self.timeout_label.configure(text=f"{timeout:.1f}s")
 
+        sens = voice.get("wake_sensitivity", 0.5)
+        self.sens_slider.set(sens)
+        self.sens_label.configure(text=f"{sens:.1f}")
+
+        thresh = self.cfg.get("speech", {}).get("speaker", {}).get("threshold", 0.5)
+        self.thresh_slider.set(thresh)
+        self.thresh_label.configure(text=f"{thresh:.1f}")
+
+        mode = voice.get("mode", "wake_word")
+        self.mode_var.set(mode)
+
         speaker = self.cfg.get("speech", {}).get("speaker", {}).get("enabled", True)
         self.speaker_var.set(speaker)
 
@@ -247,10 +305,13 @@ class SettingsWindow:
         voice["send_phrases"] = [w.strip() for w in self.send_entry.get().split(",") if w.strip()]
         voice["silence_timeout"] = round(self.timeout_slider.get(), 1)
         voice["language"] = self._lang_code
+        voice["wake_sensitivity"] = round(self.sens_slider.get(), 1)
+        voice["mode"] = self.mode_var.get()
 
         speech = self.cfg.setdefault("speech", {})
         sp = speech.setdefault("speaker", {})
         sp["enabled"] = self.speaker_var.get()
+        sp["threshold"] = round(self.thresh_slider.get(), 1)
         tt = speech.setdefault("tts", {})
         tt["enabled"] = self.tts_var.get()
 
