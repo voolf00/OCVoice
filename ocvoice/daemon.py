@@ -453,16 +453,19 @@ class VoiceDaemon:
                 if not self._listening:
                     continue
 
-                # Heartbeat + state safety
+                # Safety: сброс зависших состояний (проверка каждый чанк)
+                if self._state == "cmd" and time.time() - self._state_since > 25:
+                    print(f"[OCVoice] ⏰ State safety: cmd timeout — возврат в ожидание", flush=True)
+                    self._cmd_mode = False
+                    if self._vosk:
+                        self._vosk.reset()
+                    self._set_state("waiting")
+                if self._state == "awaiting" and time.time() - self._state_since > 25:
+                    self._set_state("waiting")
+
+                # Heartbeat
                 if time.time() - last_heartbeat > 60:
                     self._set_state(self._state)
-                    # Safety: если "awaiting" висит больше 20с → сброс
-                    if self._state == "awaiting" and time.time() - self._state_since > 20:
-                        self._set_state("waiting")
-                    # Safety: если "cmd" висит больше 30с (пользователь не сказал команду)
-                    if self._state == "cmd" and time.time() - self._state_since > 30:
-                        print(f"[OCVoice] ⏰ CMD timeout — возврат в ожидание", flush=True)
-                        self._set_state("waiting")
                     print(f"[OCVoice] Heartbeat: listening={self._listening}, "
                           f"model={self._current_model.split('/')[-1]}, agent={self._current_agent}",
                           file=sys.stderr, flush=True)
