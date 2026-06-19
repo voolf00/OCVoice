@@ -459,6 +459,10 @@ class VoiceDaemon:
                     # Safety: если "awaiting" висит больше 20с → сброс
                     if self._state == "awaiting" and time.time() - self._state_since > 20:
                         self._set_state("waiting")
+                    # Safety: если "cmd" висит больше 30с (пользователь не сказал команду)
+                    if self._state == "cmd" and time.time() - self._state_since > 30:
+                        print(f"[OCVoice] ⏰ CMD timeout — возврат в ожидание", flush=True)
+                        self._set_state("waiting")
                     print(f"[OCVoice] Heartbeat: listening={self._listening}, "
                           f"model={self._current_model.split('/')[-1]}, agent={self._current_agent}",
                           file=sys.stderr, flush=True)
@@ -578,6 +582,16 @@ class VoiceDaemon:
             return
 
         # ── CMD: используем partial (вся речь целиком) + finals ──
+        # Safety: если cmd висит >20с без end phrase — сброс
+        if time.time() - self._cmd_start > 20:
+            print(f"[OCVoice] ⏰ CMD timeout 20s — abort", flush=True)
+            self._cmd_mode = False
+            self._cmd_text = ""
+            if self._vosk:
+                self._vosk.reset()
+            self._set_state("waiting")
+            return
+
         finals = self._vosk.get_final_since_last_check()
         for f in finals:
             self._cmd_text += " " + f
