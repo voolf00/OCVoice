@@ -109,43 +109,9 @@ class OCVoiceMenuBar(rumps.App if HAS_RUMPS else object):
         self.menu.add(None)
         self.menu.add(rumps.MenuItem("🎤 Start", callback=self._action_start))
         self.menu.add(rumps.MenuItem("🔇 Stop", callback=self._action_stop))
-
-        # Language submenu
-        from ..speech.vosk_stt import LANGUAGE_ORDER, LANGUAGE_NAMES
-        lang_menu = rumps.MenuItem("🔤 Language")
-        for code in LANGUAGE_ORDER:
-            label = LANGUAGE_NAMES.get(code, code)
-            mark = "✓ " if code == self._language else "  "
-            item = rumps.MenuItem(
-                f"{mark}{label}",
-                callback=self._make_language_cb(code),
-            )
-            lang_menu.add(item)
-        self.menu.add(lang_menu)
-
         self.menu.add(None)
-        # Settings submenu with current values
-        import os as _os
-        _cfg_path = _os.path.expanduser("~/.config/ocvoice/config.toml")
-        _wake_display = "?"
-        _send_display = "?"
-        try:
-            with open(_cfg_path) as _f:
-                for _line in _f:
-                    if _line.startswith("wake_words"):
-                        _wake_display = _line.split("=")[1].strip().strip(",").strip("[]").replace('"', '').strip()[:40]
-                    elif _line.startswith("send_phrases"):
-                        _send_display = _line.split("=")[1].strip().strip(",").strip("[]").replace('"', '').strip()[:40]
-        except Exception:
-            pass
-        settings_menu = rumps.MenuItem("⚙️ Settings")
-        settings_menu.add(rumps.MenuItem(f"🎤 Wake: {_wake_display}", callback=None))
-        settings_menu.add(rumps.MenuItem(f"✉️ Send: {_send_display}", callback=None))
-        settings_menu.add(None)
-        settings_menu.add(rumps.MenuItem("📝 Edit config", callback=self._action_settings))
-        self.menu.add(settings_menu)
+        self.menu.add(rumps.MenuItem("⚙️ Settings", callback=self._action_settings))
         self.menu.add(None)
-        self.menu.add(rumps.MenuItem("📋 Status", callback=self._action_status))
         self.menu.add(rumps.MenuItem("❌ Quit", callback=self._action_quit))
 
     def _make_session_cb(self, session_id):

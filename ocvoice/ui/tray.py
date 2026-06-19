@@ -58,8 +58,7 @@ class TrayIcon:
             pystray.MenuItem("🎤 Start", self._action_start),
             pystray.MenuItem("🔇 Stop", self._action_stop),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("🔤 Language", self._build_language_menu()),
-            pystray.MenuItem("⚙️ Settings", self._build_settings_menu()),
+            pystray.MenuItem("⚙️ Settings", self._action_settings),
             pystray.MenuItem("❌ Exit", self._action_exit),
         )
 
@@ -133,7 +132,6 @@ class TrayIcon:
         return pystray.Menu(
             pystray.MenuItem(f"📁 {project}", None, enabled=False),
             pystray.MenuItem(f"💬 {current_title}", None, enabled=False),
-            pystray.MenuItem(f"🔗 {server}", None, enabled=False),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("💬 Sessions", self._build_sessions_menu()),
             pystray.MenuItem("📁 Projects", self._build_projects_menu()),
@@ -141,8 +139,7 @@ class TrayIcon:
             pystray.MenuItem("🎤 Start", self._action_start),
             pystray.MenuItem("🔇 Stop", self._action_stop),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("🔤 Language", self._build_language_menu()),
-            pystray.MenuItem("⚙️ Settings", self._build_settings_menu()),
+            pystray.MenuItem("⚙️ Settings", self._action_settings),
             pystray.MenuItem("❌ Exit", self._action_exit),
         )
 
