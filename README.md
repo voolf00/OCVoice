@@ -18,6 +18,7 @@
 - 💬 **Voice session switching** — "последняя сессия", "переключись на сессию...", "открой проект..."
 - ⚙️ **Settings GUI** — CustomTkinter window to edit wake words, send phrases, language, sensitivity
 - 🔵 **State indicators** — icon in menubar/tray changes: 🟢 ожидает → 🔵 команда → 🟣 ответ... → 🟢
+- 🎤 **Live audio device switching** — change microphone in Settings, applies immediately
 - ⏱ 10s silence → auto-send; "отправь" → instant send
 - macOS / Windows / Linux
 
@@ -68,7 +69,7 @@ Speak: **"окей код, write a sorting function, отправь"**
 
 **Via menubar/tray:** Click 🎤 icon → 📁 Projects / 💬 Sessions
 **Via CLI:** `ocv select project` / `ocv select session`
-**Via settings:** `ocv settings` or click ⚙️ Settings → CustomTkinter GUI
+**Via settings:** Click ⚙️ Settings in menubar/tray → CustomTkinter GUI
 
 ### Architecture
 
@@ -108,6 +109,9 @@ Also in `~/.config/ocvoice/state.json`.
 **File:** `~/.config/ocvoice/config.toml`
 
 ```toml
+[audio]
+device_id = 1
+
 [voice]
 language = "ru"
 wake_words = ["окей код", "hey code"]
@@ -144,6 +148,7 @@ voice_en = "en-US-JennyNeural"
 - 💬 **Голосовое переключение** — "последняя сессия", "переключись на сессию...", "открой проект..."
 - ⚙️ **Окно настроек** — CustomTkinter: wake words, send phrases, язык, чувствительность
 - 🔵 **Индикация** в меню-баре/трее: 🟢 → 🔵 → 🟣 → 🟢
+- 🎤 **Переключение девайса** — смени микрофон в настройках, работает без перезапуска
 - ⏱ 10с тишины → авто-отправка; "отправь" → мгновенная отправка
 - macOS / Windows / Linux
 
@@ -194,7 +199,7 @@ ocv start       # запустить демон
 
 **Через меню-бар/трей:** Иконка 🎤 → 📁 Проекты / 💬 Сессии
 **Через CLI:** `ocv select project` / `ocv select session`
-**Через настройки:** `ocv settings` или ⚙️ Settings → окно CustomTkinter
+**Через настройки:** ⚙️ Settings в меню-баре/трее → окно CustomTkinter
 
 ### Архитектура
 
@@ -232,6 +237,9 @@ BEEP + CMD MODE  → игнор
 **Файл:** `~/.config/ocvoice/config.toml`
 
 ```toml
+[audio]
+device_id = 1
+
 [voice]
 language = "ru"
 wake_words = ["окей код", "hey code"]

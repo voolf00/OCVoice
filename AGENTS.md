@@ -9,7 +9,6 @@ speaker verification, and full project/session management via voice or UI.
 ocv start          # Start daemon (menubar/tray appears)
 ocv stop           # Stop daemon
 ocv enroll         # Record voice print for speaker verification
-ocv settings       # Open settings GUI (or via ⚙️ in menu)
 ocv select session # Pick session interactively
 ocv select project # Pick project interactively
 ```
@@ -24,7 +23,7 @@ Speak commands in **Russian** or **English**.
 | `"окей код, новая сессия"` | Create new session |
 | `"окей код, plan mode"` / `"build mode"` | Switch agent |
 | `"окей код, открой проект [name]"` | Switch project (fuzzy match) |
-| `"окей код, [session title]"` | Switch session |
+| `"окей код, переключись на сессию [title]"` | Switch session |
 | `"окей код, последняя сессия"` | Back to most recent |
 | `"окей код, стоп"` | Pause listening |
 | `"окей код, найди сервер"` | Rediscover IDE |
@@ -43,7 +42,7 @@ Speak commands in **Russian** or **English**.
 
 ## UI
 
-- **macOS:** Menu bar (rumps) — 🎤 icon with project/session/language menus
+- **macOS:** Menu bar (rumps) — 🎤 icon with project/session menus
 - **Linux/Windows:** System tray (pystray) — same functionality
 - **CLI:** `ocv select [session|project|status]` — interactive picker
 - **Settings:** CustomTkinter window — wake/send phrases, language, sensitivity, toggles
@@ -63,6 +62,9 @@ Also in `~/.config/ocvoice/state.json`.
 Key file: `~/.config/ocvoice/config.toml`
 
 ```toml
+[audio]
+device_id = 1
+
 [voice]
 language = "ru"
 wake_words = ["окей код", "hey code"]
