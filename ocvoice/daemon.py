@@ -1209,6 +1209,8 @@ class VoiceDaemon:
         else:
             if self.tray and command.intent not in (Intent.STOP_LISTENING, Intent.START_LISTENING):
                 self.tray.update("ready")
+            if command.intent not in (Intent.STOP_LISTENING, Intent.START_LISTENING):
+                self._set_state("waiting")
 
     def _init_state_session(self):
         """Create the status indicator session and clean up old ones."""
@@ -1933,10 +1935,14 @@ class VoiceDaemon:
         if sessions:
             latest = max(sessions, key=lambda s: s.get('time', {}).get('updated', 0))
             if self.client:
-                self.client.session_id = latest['id']
+                session_id = latest['id']
+                self.client.session_id = session_id
                 self._manual_session_until = time.time() + 30
-            print(f"  📋 Сессия: {latest.get('title', 'untitled')[:40]}", flush=True)
+                print(f"  📋 Сессия: {latest.get('title', 'untitled')[:40]} ({session_id[:20]}...)", flush=True)
+        else:
+            print(f"  ⚠️ Нет сессий для проекта {name}", flush=True)
 
+        self._set_state("waiting")
         self._update_ui_menu()
         self._beep(660, 0.1)
 
