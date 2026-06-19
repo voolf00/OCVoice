@@ -1,7 +1,7 @@
 # OpenCode Voice (OCVoice)
 
-**Voice control for OpenCode** — the AI programming assistant.
-**Голосовое управление для OpenCode** — AI-ассистента для программирования.
+**Voice control for OpenCode Desktop** — the AI programming assistant.
+**Голосовое управление для OpenCode Desktop** — AI-ассистента для программирования.
 
 > ⚠️ Tested on macOS M1 (Apple Silicon). Linux and Windows may work
 > but are not yet validated. Contributions welcome!
