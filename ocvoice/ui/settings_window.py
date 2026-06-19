@@ -124,15 +124,6 @@ class SettingsWindow:
         scroll = ctk.CTkScrollableFrame(self.win, corner_radius=0)
         scroll.pack(fill="both", expand=True, padx=10, pady=(10, 0))
 
-        # Enable mousewheel scrolling on all platforms
-        def _bind_mw(e):
-            scroll._parent_canvas.bind_all("<MouseWheel>",
-                lambda ev: scroll._parent_canvas.yview_scroll(int(-1*(ev.delta/120)), "units"))
-        def _unbind_mw(e):
-            scroll._parent_canvas.unbind_all("<MouseWheel>")
-        scroll.bind("<Enter>", _bind_mw)
-        scroll.bind("<Leave>", _unbind_mw)
-
         # Wake words
         ctk.CTkLabel(scroll, text="🎤 Wake Words", anchor="w",
                       font=ctk.CTkFont(size=14, weight="bold")).pack(fill="x", pady=(10, 0))
@@ -296,6 +287,30 @@ class SettingsWindow:
             fg_color="#555555", hover_color="#444444",
             height=38,
         ).pack(side="right", padx=(5, 0))
+
+        # Enable mousewheel scrolling on all child widgets recursively
+        self.win.after(100, lambda: self._enable_scroll_recursive(scroll))
+
+    def _enable_scroll_recursive(self, scroll, widget=None):
+        """Recursively bind mousewheel to scrollable frame and all children."""
+        def _on_scroll(event):
+            try:
+                scroll._parent_canvas.yview_scroll(
+                    int(-1 * (event.delta / 120)), "units"
+                )
+            except AttributeError:
+                try:
+                    scroll._canvas.yview_scroll(
+                        int(-1 * (event.delta / 120)), "units"
+                    )
+                except AttributeError:
+                    pass
+            return "break"
+        if widget is None:
+            widget = scroll
+        widget.bind("<MouseWheel>", _on_scroll, add="+")
+        for child in widget.winfo_children():
+            self._enable_scroll_recursive(scroll, child)
 
     @staticmethod
     def _get_audio_devices() -> list[dict]:
