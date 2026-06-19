@@ -122,7 +122,16 @@ class SettingsWindow:
     def _build_ui(self):
         # Scrollable frame for content
         scroll = ctk.CTkScrollableFrame(self.win, corner_radius=0)
-        scroll.pack(fill="both", expand=True, padx=10, pady=10)
+        scroll.pack(fill="both", expand=True, padx=10, pady=(10, 0))
+
+        # Enable mousewheel scrolling on all platforms
+        def _bind_mw(e):
+            scroll._parent_canvas.bind_all("<MouseWheel>",
+                lambda ev: scroll._parent_canvas.yview_scroll(int(-1*(ev.delta/120)), "units"))
+        def _unbind_mw(e):
+            scroll._parent_canvas.unbind_all("<MouseWheel>")
+        scroll.bind("<Enter>", _bind_mw)
+        scroll.bind("<Leave>", _unbind_mw)
 
         # Wake words
         ctk.CTkLabel(scroll, text="🎤 Wake Words", anchor="w",
