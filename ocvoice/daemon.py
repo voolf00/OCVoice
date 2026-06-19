@@ -94,6 +94,14 @@ class VoiceDaemon:
         self._state = state
         self._state_since = time.time()
 
+        # When awaiting AI response, save current session timestamp
+        if state == "awaiting" and self.client and self.client.session_id:
+            try:
+                s = self.client.get_session(self.client.session_id)
+                self._session_timestamps[self.client.session_id] = s.get('time', {}).get('updated', 0)
+            except Exception:
+                pass
+
         state_map = {
             "waiting":   ("🟢", "ожидает"),
             "cmd":       ("🔵", "команда"),
@@ -677,11 +685,9 @@ class VoiceDaemon:
         try:
             self.client.send_prompt_async(text)
             print(f"[OCVoice] ✅ Отправлено асинхронно", flush=True)
-            self._set_state("waiting")
             self._beep(1200, 0.08)
         except Exception as e:
             print(f"[OCVoice] ❌ Ошибка async: {e}", flush=True)
-            self._set_state("waiting")
             self._send_message(text)
 
     def _process_always_on_mode(self, chunk: np.ndarray):
@@ -1541,13 +1547,31 @@ class VoiceDaemon:
             return 0
 
     def _check_session_changes(self):
-        """List sessions; if a non-current user session has newer updated, switch to it."""
+        """List sessions; if awaiting AI response, detect completion and reset."""
         if not self.client:
             return
         try:
             sessions = self.client.list_sessions()
             if not sessions:
                 return
+
+            current_id = self.client.session_id
+
+            # If awaiting AI response, check if current session updated
+            if self._state == "awaiting" and current_id:
+                for s in sessions:
+                    if s['id'] == current_id:
+                        updated = s.get('time', {}).get('updated', 0)
+                        if updated > self._session_timestamps.get(current_id, 0):
+                            self._session_timestamps[current_id] = updated
+                            print(f"  ✅ AI ответил", flush=True)
+                            self._set_state("waiting")
+                        break
+                return
+
+            if time.time() < self._manual_session_until:
+                return
+
             user_sessions = [s for s in sessions
                              if '[OCVoice]' not in s.get('title', '')
                              and s.get('id') != self._state_session_id]
@@ -1555,11 +1579,7 @@ class VoiceDaemon:
                 return
 
             latest = max(user_sessions, key=lambda s: s.get('time', {}).get('updated', 0))
-            current_id = self.client.session_id
             latest_updated = latest.get('time', {}).get('updated', 0)
-
-            if time.time() < self._manual_session_until:
-                return
 
             if latest['id'] != current_id:
                 current_updated = 0
