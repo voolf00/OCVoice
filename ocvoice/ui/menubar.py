@@ -213,6 +213,17 @@ class OCVoiceMenuBar(rumps.App if HAS_RUMPS else object):
             cb()
         rumps.quit_application()
 
+    STATE_ICONS = {
+        "waiting": "🟢",
+        "cmd": "🔵",
+        "awaiting": "🟣",
+        "stopped": "🔴",
+    }
+
+    def set_state_indicator(self, state: str):
+        icon = self.STATE_ICONS.get(state, "🎤")
+        self.title = icon
+
     def set_listening(self, active: bool):
         self.title = "🟢" if active else "🔴"
 
@@ -302,6 +313,8 @@ class MenuBarManager:
                     self._app.set_ready()
                 case "error":
                     self._app.set_error()
+                case _:
+                    self._app.set_state_indicator(status)
 
     def notify(self, title: str, message: str):
         if self._app:

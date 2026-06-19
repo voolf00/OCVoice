@@ -141,6 +141,12 @@ class VoiceDaemon:
         except Exception:
             pass
 
+        # 4. UI indicator (menubar / tray)
+        if self.menubar:
+            self.menubar.update_status(state)
+        if self.tray:
+            self.tray.update(state)
+
     def setup(self) -> bool:
         """Initialize all components. Returns False on critical failure."""
         print("[OCVoice] Initializing voice daemon...")

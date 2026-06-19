@@ -27,6 +27,9 @@ class TrayIcon:
         "processing": "#4488FF",
         "ready": "#44CC44",
         "error": "#FF4444",
+        "waiting": "#44CC44",
+        "cmd": "#4488FF",
+        "awaiting": "#AA44FF",
     }
 
     def __init__(self, callbacks: dict):
