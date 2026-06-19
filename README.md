@@ -1,248 +1,251 @@
 # OCVoice
 
-Голосовое управление для **OpenCode** — AI-ассистента для программирования.
+Voice control for **OpenCode** — the AI programming assistant.
 
-Говорите команды голосом, OCVoice распознаёт речь, находит wake word "окей код", отправляет сообщения в вашу IDE-сессию OpenCode.
+Speak commands in Russian or English. OCVoice detects the wake word "окей код",
+streams speech recognition in real time, and sends messages to your OpenCode IDE session.
 
-## Возможности
+## Features
 
-- 🎤 Управление OpenCode голосом
-- 🧠 Распознавание речи: **Vosk** (реальное время, офлайн) + **Whisper** (точность, офлайн)
-- 🔒 **Speaker Verification** — только ваш голос, радио/TV/другие люди игнорируются
-- 🏃 **Стриминг** — слова появляются по мере говорения, без окон по 3 секунды
-- 🔄 Работает во **всех проектах и сессиях** OpenCode Desktop IDE
-- 10 секунд тишины → авто-отправка
-- "отправь" → мгновенная отправка
-- 🟢🟡🔵🟣✅ индикация состояния в названии сессии
+- 🎤 Voice control for OpenCode — switch projects, sessions, agents, models
+- 🧠 Speech recognition: **Vosk** (real-time, offline) + **Whisper** (high accuracy, offline)
+- 🔒 **Speaker verification** (Resemblyzer) — only your voice gets through
+- 🏃 **Streaming** — words appear as you speak, no 3-second windows
+- 📁 **Project-aware** — select projects from your OpenCode Desktop list; sessions filter automatically
+- 💬 **Session-aware** — pick sessions from any project via menubar, tray, or CLI
+- ⏱ 10 seconds of silence → auto-send
+- "отправь" → instant send
+- 🟢🟡🔵🟣✅ state shown in session title
 - macOS / Windows / Linux
 
-## Быстрый старт
+## Quick Start
 
 ```bash
-git clone https://github.com/ваш-репозиторий/OCVoice.git
+git clone https://github.com/voolf00/OCVoice.git
 cd OCVoice
 
 # macOS / Linux
 ./install.sh
 
-# или Windows
+# or Windows
 install.bat
 ```
 
-После установки:
+After install:
 
 ```bash
-# Записать отпечаток голоса (10 секунд)
+# Enroll voice print (10 seconds)
 ocv enroll
 
-# Запустить демон
+# Start the daemon
 ocv start
 ```
 
-Готово. Говорите: **"окей код, напиши функцию сортировки, отправь"**
+Start speaking: **"окей код, write a sorting function, отправь"**
 
-## Как это работает
+## Voice Commands
+
+| Command | Action |
+|---------|--------|
+| "окей код, [message], отправь" | Send message to IDE |
+| "окей код, стоп" / "stop" | Pause listening |
+| "окей код, новая сессия" | Create new session |
+| "окей код, plan mode" | Switch to Plan agent |
+| "окей код, build mode" | Switch to Build agent |
+| "окей код, найди сервер" / "find server" | Rediscover IDE server |
+| "окей код, список проектов" / "list projects" | List all projects |
+
+Messages without "отправь" auto-send after 10 seconds of silence.
+
+## Selecting Projects & Sessions
+
+OCVoice integrates with OpenCode Desktop to let you choose which project and session to work with.
+
+### Menu Bar (macOS)
+
+Click the 🎤 icon in the menu bar:
+
+- **📁 Projects** — lists all projects from your OpenCode Desktop config. Click to switch — sessions filter to that project automatically.
+- **💬 Sessions** — shows sessions for the current project. Click to switch.
+- **✚ New Session** — create a fresh session.
+
+### System Tray (Linux/Windows)
+
+Same functionality via the system tray icon.
+
+### CLI
+
+```bash
+# Show current project and session
+ocv select status
+
+# Pick a session interactively
+ocv select session
+
+# Pick a project interactively
+ocv select project
+```
+
+### How it works
+
+Projects are read from OpenCode Desktop's `opencode.global.dat` config and the SQLite database at `~/.local/share/opencode/opencode.db`. Sessions are filtered by the selected project's worktree path using a SQLite `JOIN` on the `session` and `project` tables. No port scanning needed — OCVoice stays connected to the main Desktop server.
+
+## Architecture
 
 ```
-Микрофон → Vosk (стриминг) → "окей... код... тест..."
+Microphone → Vosk (streaming) → "okay... code... test..."
                                     ↓
-                          wake word "окей код" найден?
+                          wake word "окей код" found?
                                     ↓
-                     ⬇️ ДА                    ⬇️ НЕТ
-                Speaker Verify          → ждём дальше
+                     ⬇️ YES                   ⬇️ NO
+                Speaker Verify           → keep listening
                      ⬇️
-               score > 0.5? (твой голос?)
-          ⬇️ ДА                 ⬇️ НЕТ
-     BEEP + CMD START      → игнор
+               score > 0.5? (your voice?)
+          ⬇️ YES                 ⬇️ NO
+     BEEP + CMD START          → ignore
           ⬇️
-     говоришь сообщение
-     "отправь" → ✅ отправлено в IDE
-     тишина 10с → ✅ авто-отправка
+     speak your message
+     "отправь" → ✅ sent to IDE
+     silence 10s → ✅ auto-send
 ```
 
-## Установка на macOS
+## State Indicators
 
-```bash
-# 1. Клонировать
-git clone https://github.com/ваш-репозиторий/OCVoice.git
-cd OCVoice
+The session title in OpenCode Desktop updates automatically:
 
-# 2. Установить
-./install.sh
+| Icon | State | Description |
+|------|-------|-------------|
+| 🟢 | waiting | Waiting for "окей код" |
+| 🔵 | command | Listening, building text |
+| 🟣 | awaiting | Sent, waiting for AI |
+| ✅ | ready | Message delivered |
 
-# 3. Записать голос
-ocv enroll
+Also visible in `~/.config/ocvoice/state.json` (macOS/Linux)
+or `%USERPROFILE%\.config\ocvoice\state.json` (Windows).
 
-# 4. Запустить
-ocv start
+## Configuration
 
-# 5. Использовать
-Говорите: "окей код, тестовое сообщение, отправь"
-```
+Config file: `~/.config/ocvoice/config.toml`
 
-## Установка на Windows
-
-```cmd
-:: Запустить от имени пользователя (не администратор)
-install.bat
-
-:: Записать голос
-ocv enroll
-
-:: Запустить
-ocv start
-```
-
-## Установка на Linux
-
-```bash
-./install.sh
-```
-
-Требуется: Python 3.10+, pip, PortAudio (`apt install portaudio19-dev` на Ubuntu).
-
-## Голосовые команды
-
-| Команда | Действие |
-|---------|----------|
-| "окей код, [сообщение], отправь" | Отправить сообщение в IDE |
-| "окей код, стоп" | Пауза прослушивания |
-| "окей код, новая сессия" | Создать новую сессию |
-| "окей код, plan mode" | Переключить в режим Plan |
-| "окей код, build mode" | Переключить в режим Build |
-
-Любое сообщение без "отправь" отправится автоматически через 10 секунд тишины.
-
-## Индикация состояния
-
-Название сессии в OpenCode Desktop меняется автоматически:
-
-| Иконка | Состояние | Описание |
-|--------|-----------|----------|
-| 🟢 | ожидает | Ждёт "окей код" |
-| 🔵 | команда | Слушает, набирает текст |
-| 🟣 | ответ... | Отправлено, ждёт AI |
-| ✅ | готов | Сообщение доставлено |
-
-Также можно смотреть `~/.config/ocvoice/state.json` (macOS/Linux)
-или `%USERPROFILE%\.config\ocvoice\state.json` (Windows).
-
-## Настройка
-
-Конфиг: `~/.config/ocvoice/config.toml`
-
-Основные параметры:
+Key options:
 
 ```toml
 [audio]
-device_id = 1  # 0 = iPhone, 1 = MacBook встроенный
+device_id = 1  # 0 = iPhone, 1 = MacBook built-in
 
 [speech.speaker]
-enabled = true          # верификация голоса
-threshold = 0.5          # порог: выше = строже, ниже = лояльнее
+enabled = true          # speaker verification
+threshold = 0.5         # higher = stricter, lower = more permissive
 
 [speech.stt]
-local_model = "base"     # tiny/base/small/medium (размер whisper)
+local_model = "base"     # tiny/base/small/medium (whisper model size)
 
 [voice]
 mode = "wake_word"       # wake_word | always_on | push_to_talk
 wake_words = ["окей код", "hey code"]
-silence_timeout = 0.8    # секунд тишины для детекции конца речи
+silence_timeout = 0.8    # seconds of silence to detect end of speech
+
+[ui]
+menubar = true           # macOS menu bar (default: true)
+tray_enabled = false     # system tray (default: false on macOS)
 ```
 
-## Переустановка голосового отпечатка
+## Re-enrolling Voice
 
 ```bash
 rm -rf ~/.config/ocvoice/enrollments
 ocv enroll
 ```
 
-## Автозапуск
+## Autostart
 
 ```bash
-# macOS — LaunchAgent (автостарт при входе)
+# macOS — LaunchAgent (starts on login)
 ocv autostart install
 
-# Отключить
+# Remove
 ocv autostart uninstall
 ```
 
-## Структура проекта
+## Project Structure
 
 ```
 OCVoice/
-├── bin/ocv               # CLI-лаунчер (основная команда)
-├── install.sh             # Установщик macOS/Linux
-├── install.bat            # Установщик Windows
-├── install.ps1            # Установщик Windows PowerShell
-├── config.toml            # Конфигурация по умолчанию
-├── start.sh               # Быстрый запуск демона
-├── README.md              # Этот файл
+├── bin/ocv               # CLI launcher
+├── install.sh             # macOS/Linux installer
+├── install.bat            # Windows installer
+├── config.toml            # Default config
+├── start.sh               # Quick daemon start
 ├── ocvoice/
-│   ├── daemon.py          # Основной цикл
-│   ├── config.py          # Загрузка конфига
-│   └── audio/
-│       ├── capture.py     # Захват аудио
-│       ├── vad.py         # Voice Activity Detection
-│       └── wake.py        # Wake word детектор
+│   ├── daemon.py          # Main daemon loop
+│   ├── config.py          # Config loader
+│   ├── cli/
+│   │   ├── select.py      # Interactive project/session picker
+│   │   └── ipc.py         # CLI↔daemon IPC via JSON file
+│   ├── audio/
+│   │   ├── capture.py     # Audio capture
+│   │   ├── vad.py         # Voice Activity Detection
+│   │   └── wake.py        # Wake word detection
 │   ├── speech/
-│       ├── stt.py         # Whisper STT
-│       ├── vosk_stt.py    # Vosk стриминг
-│       ├── speaker.py     # Speaker verification
-│       └── tts.py         # Text-to-Speech
+│   │   ├── stt.py         # Whisper STT
+│   │   ├── vosk_stt.py    # Vosk streaming
+│   │   ├── speaker.py     # Speaker verification
+│   │   └── tts.py         # Text-to-Speech
 │   ├── intent/
-│       ├── parser.py      # Парсер команд
-│       └── intents.py     # Определения команд
-│   └── opencode/
-│       ├── client.py      # API клиент OpenCode
-│       ├── launcher.py    # Запуск opencode serve
-│       └── ide_discovery.py # Поиск IDE сервера
+│   │   ├── parser.py      # Command parser
+│   │   └── intents.py     # Intent definitions
+│   ├── opencode/
+│   │   ├── client.py      # OpenCode API client
+│   │   ├── launcher.py    # opencode serve launcher
+│   │   └── ide_discovery.py # IDE server discovery
 │   └── ui/
-│       ├── notify.py      # Уведомления
-│       ├── overlay.py     # Плавающее окно
-│       └── tray.py        # System tray
+│       ├── menubar.py     # macOS menu bar (rumps)
+│       ├── tray.py        # System tray (pystray)
+│       ├── overlay.py     # Floating overlay
+│       └── notify.py      # Notifications
 ├── .opencode/
-│   ├── commands/voice.md  # /voice команда для OpenCode
-│   └── plugins/ocvoice.js # Плагин для OpenCode
+│   ├── commands/voice.md  # /voice command for OpenCode
+│   └── plugins/ocvoice.js # OpenCode plugin
 └── tests/
 ```
 
-## Зависимости
+## Dependencies
 
-| Пакет | Размер | Назначение |
-|-------|--------|------------|
-| `vosk` | 2MB | Стриминг речи (реальное время) |
-| `faster-whisper` | 142MB | Точное распознавание (fallback) |
-| `resemblyzer` | 15MB | Верификация голоса |
-| `sounddevice` | <1MB | Захват аудио |
-| `webrtcvad` | <1MB | Детекция активности речи |
+| Package | Size | Purpose |
+|---------|------|---------|
+| `vosk` | 2MB | Real-time speech streaming |
+| `faster-whisper` | 142MB | High-accuracy recognition (fallback) |
+| `resemblyzer` | 15MB | Speaker verification |
+| `sounddevice` | <1MB | Audio capture |
+| `webrtcvad` | <1MB | Voice activity detection |
 | `rumps` | <1MB | Menu bar (macOS) |
-| `edge-tts` | <1MB | Озвучивание ответов |
+| `edge-tts` | <1MB | Text-to-speech responses |
+| `pystray` | <1MB | System tray (Linux/Windows) |
 
-## Устранение проблем
+## Troubleshooting
 
 ### "ocv: command not found"
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
-# Добавьте в ~/.zshrc или ~/.bashrc
+# Add to ~/.zshrc or ~/.bashrc
 ```
 
 ### "ocvoice: command not found"
 ```bash
 cd OCVoice
-.venv/bin/python3 -m ocvoice [команда]
+.venv/bin/python3 -m ocvoice [command]
 ```
 
-### Не слышит микрофон
+### Microphone not working
 ```bash
-ocvoice start --debug  # или смотри: tail -f /tmp/ocvoice-daemon.log
+ocvoice start --debug  # or check: tail -f /tmp/ocvoice-daemon.log
 ```
 
-### Speaker verification не пропускает
+### Speaker verification rejecting you
 ```bash
-ocv enroll  # перезаписать отпечаток голоса
+ocv enroll  # re-record voice print
 ```
 
-## Лицензия
+## License
 
 MIT
