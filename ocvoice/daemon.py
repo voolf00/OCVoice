@@ -101,7 +101,6 @@ class VoiceDaemon:
             "stopped":   ("🔴", "выкл"),
         }
         icon, label = state_map.get(state, ("⚪", "?"))
-        dock_label = icon
 
         # 1. Обновить сессию-индикатор (видна во всех проектах)
         if self.client and self._state_session_id:
@@ -111,19 +110,7 @@ class VoiceDaemon:
             except Exception:
                 pass
 
-        # 2. Dock badge (macOS)
-        if dock_label:
-            try:
-                import subprocess
-                subprocess.run(
-                    ["osascript", "-e",
-                     f'tell application "System Events" to set badge of (first process whose name is "OpenCode") to "{dock_label}"'],
-                    capture_output=True, timeout=2,
-                )
-            except Exception:
-                pass
-
-        # 3. State file
+        # 2. State file
         try:
             import json
             from pathlib import Path
@@ -141,7 +128,7 @@ class VoiceDaemon:
         except Exception:
             pass
 
-        # 4. UI indicator (menubar / tray)
+        # 3. UI indicator (menubar / tray)
         if self.menubar:
             self.menubar.update_status(state)
         if self.tray:
