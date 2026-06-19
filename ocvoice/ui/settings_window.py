@@ -288,29 +288,8 @@ class SettingsWindow:
             height=38,
         ).pack(side="right", padx=(5, 0))
 
-        # Enable mousewheel scrolling on all child widgets recursively
-        self.win.after(100, lambda: self._enable_scroll_recursive(scroll))
-
-    def _enable_scroll_recursive(self, scroll, widget=None):
-        """Recursively bind mousewheel to scrollable frame and all children."""
-        def _on_scroll(event):
-            try:
-                scroll._parent_canvas.yview_scroll(
-                    int(-1 * (event.delta / 120)), "units"
-                )
-            except AttributeError:
-                try:
-                    scroll._canvas.yview_scroll(
-                        int(-1 * (event.delta / 120)), "units"
-                    )
-                except AttributeError:
-                    pass
-            return "break"
-        if widget is None:
-            widget = scroll
-        widget.bind("<MouseWheel>", _on_scroll, add="+")
-        for child in widget.winfo_children():
-            self._enable_scroll_recursive(scroll, child)
+        # Give focus to scroll frame so mousewheel works with CTk's built-in handler
+        scroll.focus_set()
 
     @staticmethod
     def _get_audio_devices() -> list[dict]:
