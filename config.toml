@@ -1,0 +1,98 @@
+# OCVoice Configuration
+# Default configuration — copy to ~/.config/ocvoice/config.toml to customize
+
+[audio]
+# Audio input device ID (null = auto-detect system default)
+device_id = 1
+# Sample rate in Hz (16000 is optimal for speech recognition)
+sample_rate = 16000
+# Number of audio channels (1 = mono)
+channels = 1
+# Audio buffer chunk size in samples
+chunk_size = 1024
+
+[voice]
+# Listening mode: "wake_word" | "always_on" | "push_to_talk"
+mode = "wake_word"
+# Wake words that activate listening (used when mode = "wake_word")
+wake_words = ["окей код", "hey code"]
+# Wake word detection sensitivity (0.0 = less false positives, 1.0 = more sensitive)
+wake_sensitivity = 0.5
+# Seconds of silence before considering speech ended
+silence_timeout = 0.8
+# Maximum recording duration in seconds (safety limit)
+max_duration = 2.0
+
+[speech.stt]
+# Speech-to-text backend: "local" | "api" | "auto"
+# "auto" = try local first, fallback to API
+backend = "auto"
+# Local model size: "tiny" | "base" | "small" | "medium"
+# tiny (~75MB) - fastest, least accurate
+# base (~142MB) - good balance
+# small (~466MB) - more accurate
+local_model = "base"
+# Device for local inference: "cpu" | "cuda"
+local_device = "cpu"
+# Compute type: "default" | "auto" | "int8" | "int8_float16" | "int16" | "float16" | "float32"
+local_compute_type = "default"
+# OpenAI API key for Whisper API fallback (reads from env OPENAI_API_KEY if empty)
+api_key = ""
+# When true and backend is "auto", fall back to API if local fails
+fallback_to_api = true
+
+[speech.speaker]
+# Enable speaker verification
+enabled = true
+# Cosine similarity threshold (0.0 - 1.0). Higher = stricter matching
+threshold = 0.5
+# Directory for stored voice enrollments
+enrollments_dir = ""
+
+[speech.tts]
+# Enable text-to-speech for OpenCode responses
+enabled = true
+# TTS backend: "edge" | "piper"
+backend = "edge"
+# Voice for Russian (Edge TTS voice name)
+voice_ru = "ru-RU-SvetlanaNeural"
+# Voice for English (Edge TTS voice name)
+voice_en = "en-US-JennyNeural"
+# Speech speed multiplier (0.5 - 2.0)
+speed = 1.0
+
+[opencode]
+# OpenCode server host
+host = "127.0.0.1"
+# OpenCode server port
+port = 4096
+# Automatically start opencode serve if not running
+auto_start = true
+# Default model in provider/model format
+default_model = "anthropic/claude-sonnet-4-5"
+# Default agent: "build" | "plan" | custom agent name
+default_agent = "build"
+# Path to opencode binary (auto-detect from PATH if empty)
+binary_path = ""
+
+[intent]
+# Intent parser: "regex" | "llm"
+parser = "regex"
+# Minimum confidence for regex intents (0.0 - 1.0)
+confidence_threshold = 0.7
+
+[ui.tray]
+# Show system tray icon (Linux/Windows supported; macOS may have PyObjC threading issues)
+enabled = true
+# Show desktop notifications
+show_notifications = true
+# Play sound feedback on command recognition/execution
+sound_feedback = true
+
+[ui]
+# Headless mode: use desktop notifications instead of terminal output
+# Set to true when running as a background daemon alongside OpenCode Desktop IDE
+headless = false
+# Menu bar icon (macOS only). Set to true to enable 🎤 in your menu bar.
+# Requires: pip install rumps
+menubar = true

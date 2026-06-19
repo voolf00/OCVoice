@@ -1,0 +1,1883 @@
+"""Voice Daemon — the core loop of OCVoice.
+
+Orchestrates the full pipeline:
+  Audio → VAD → Wake Word → STT → Speaker Verify → Intent → OpenCode API
+"""
+
+import json
+import os
+import signal
+import sys
+import threading
+import time
+from pathlib import Path
+from typing import Optional
+
+import numpy as np
+
+from .config import Config
+from .audio.capture import AudioCapture
+from .audio.vad import VoiceActivityDetector
+from .audio.wake import WakeWordDetector, SimpleWakeWordDetector
+from .speech.stt import SpeechToText
+from .speech.speaker import SpeakerVerifier
+from .intent.parser import IntentParser, ParsedCommand
+from .intent.intents import Intent
+from .opencode.client import OpenCodeClient
+from .opencode.launcher import OpenCodeLauncher
+from .opencode.ide_discovery import IDEDiscovery
+from .ui.tray import TrayManager
+from .cli.ipc import read_command, clear_command
+from .ui.menubar import MenuBarManager
+from .ui.overlay import OverlayManager
+from .ui.notify import notify
+
+
+class VoiceDaemon:
+    """Main voice control daemon."""
+
+    def __init__(self, config: Config):
+        self.config = config
+        self._running = False
+        self._listening = True  # Can be toggled by voice commands
+
+        # Components (initialized in setup)
+        self.capture: Optional[AudioCapture] = None
+        self.vad: Optional[VoiceActivityDetector] = None
+        self.wake: Optional[WakeWordDetector | SimpleWakeWordDetector] = None
+        self.stt: Optional[SpeechToText] = None
+        self.speaker: Optional[SpeakerVerifier] = None
+        self.parser: Optional[IntentParser] = None
+        self.client: Optional[OpenCodeClient] = None
+        self.launcher: Optional[OpenCodeLauncher] = None
+        self.tray: Optional[TrayManager] = None
+        self.menubar: Optional[MenuBarManager] = None
+        self.overlay: Optional[OverlayManager] = None
+
+        # State
+        self._audio_buffer: list[np.ndarray] = []
+        self._speaking = False
+        self._wake_detected = False
+        self._current_model = config.opencode_default_model
+        self._current_agent = config.opencode_default_agent
+        self._headless = config.headless
+        self._quiet_until = time.time()
+        self._cmd_mode = False
+        self._cmd_text = ""
+        self._cmd_start = time.time()
+        self._vosk = None
+        self._verify_buffer: list[np.ndarray] = []
+        self._cmd_longest = ""
+        self._cmd_paused = False
+        self._cmd_paused_at = 0.0
+        self._cmd_last_partial = ""
+        self._cmd_silence_since = time.time()
+        self._vad_cmd_buffer = np.array([], dtype=np.float32)
+        self._state = ""
+        self._state_since = 0
+        self._last_title_update = 0.0
+        self._state_session_id: Optional[str] = None
+        self._session_timestamps: dict[str, float] = {}
+        self._manual_session_until = 0.0
+        self._selected_project_worktree: str = ""
+
+    def _notify(self, title: str, text: str):
+        """Send desktop notification + always print to stderr for logs."""
+        notify(title, text)
+        print(f"[{title}] {text}", file=sys.stderr, flush=True)
+
+    def _set_state(self, state: str):
+        """Update all state indicators: session title, dock badge, state file.
+        
+        States: waiting, recording, cmd, sending, ready, stopped
+        """
+        if state == self._state:
+            return
+        self._state = state
+        self._state_since = time.time()
+
+        state_map = {
+            "waiting":   ("🟢", "ожидает"),
+            "recording": ("🟡", "слушает"),
+            "cmd":       ("🔵", "команда"),
+            "sending":   ("🔵", "отправка"),
+            "awaiting":  ("🟣", "ответ..."),
+            "ready":     ("✅", "готов"),
+            "stopped":   ("🔴", "выкл"),
+        }
+        icon, label = state_map.get(state, ("⚪", "?"))
+        dock_label = icon
+
+        # 1. Обновить сессию-индикатор (видна во всех проектах)
+        if self.client and self._state_session_id and time.time() - self._last_title_update > 1:
+            try:
+                title = f"{icon} [OCVoice] {label}"
+                self.client.update_session(title=title, session_id=self._state_session_id)
+                self._last_title_update = time.time()
+            except Exception:
+                pass
+
+        # 2. Dock badge (macOS)
+        if dock_label:
+            try:
+                import subprocess
+                subprocess.run(
+                    ["osascript", "-e",
+                     f'tell application "System Events" to set badge of (first process whose name is "OpenCode") to "{dock_label}"'],
+                    capture_output=True, timeout=2,
+                )
+            except Exception:
+                pass
+
+        # 3. State file
+        try:
+            import json
+            from pathlib import Path
+            state_path = Path.home() / ".config" / "ocvoice" / "state.json"
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.write_text(json.dumps({
+                "state": state,
+                "icon": icon,
+                "label": label,
+                "listening": self._listening,
+                "since": self._state_since,
+                "model": self._current_model,
+                "agent": self._current_agent,
+            }, ensure_ascii=False))
+        except Exception:
+            pass
+
+    def setup(self) -> bool:
+        """Initialize all components. Returns False on critical failure."""
+        print("[OCVoice] Initializing voice daemon...")
+
+        # ── Step 0: Discover OpenCode IDE/CLI server ──
+        self.launcher = OpenCodeLauncher(
+            binary_path=self.config.opencode_binary_path,
+            host=self.config.opencode_host,
+            port=self.config.opencode_port,
+        )
+
+        ide = IDEDiscovery()
+        ide_found = ide.discover()
+        
+        if ide_found:
+            print(f"[OCVoice] Found OpenCode server at {ide.base_url}")
+            self.client = OpenCodeClient(base_url=ide.base_url, auth=ide.auth)
+            # Verify we can actually use it
+            try:
+                self.client.list_sessions()
+                print(f"[OCVoice] API connection OK")
+            except Exception:
+                print(f"[OCVoice] IDE requires auth — starting own server on port 4096")
+                ide_found = False
+
+        if not ide_found:
+            print("[OCVoice] Starting OpenCode server on port 4096...")
+            if self.launcher.start(timeout=30.0):
+                self.client = OpenCodeClient(base_url=self.config.opencode_base_url)
+            else:
+                print("[OCVoice] WARNING: Could not start OpenCode server")
+                self.client = OpenCodeClient(base_url=self.config.opencode_base_url)
+
+        # Detect correct path prefix for this server
+        print(f"[OCVoice] 📡 Сервер: {str(self.client.client.base_url)}", flush=True)
+
+        # ── Audio capture (auto-detect mic) ──
+        device_id = self.config.audio_device
+        if device_id < 1:
+            try:
+                from .audio.capture import AudioCapture as _AC
+                device_id = _AC.auto_detect_device()
+                print(f"[OCVoice] Auto-detected mic device: {device_id}")
+            except Exception:
+                pass
+        else:
+            try:
+                from .audio.capture import AudioCapture as _AC
+                recommended = _AC.auto_detect_device()
+                if device_id != recommended and device_id == 0:
+                    print(f"[OCVoice] Config has device_id=0 (iPhone?), using auto-detected {recommended}")
+                    device_id = recommended
+                elif device_id != recommended:
+                    print(f"[OCVoice] Using mic device {device_id} from config (auto would pick {recommended})")
+            except Exception:
+                pass
+
+        try:
+            self.capture = AudioCapture(
+                sample_rate=self.config.audio_sample_rate,
+                channels=self.config.audio_channels,
+                device_id=device_id,
+                chunk_size=self.config.audio_chunk_size,
+            )
+        except RuntimeError as e:
+            print(f"[OCVoice] Audio capture error: {e}")
+            return False
+
+        # ── VAD ──
+        try:
+            self.vad = VoiceActivityDetector(
+                sample_rate=self.config.audio_sample_rate,
+                silence_frames=int(self.config.silence_timeout * 1000 / 30),
+            )
+        except RuntimeError:
+            print("[OCVoice] WARNING: VAD not available, continuous mode")
+            self.vad = None
+
+        # ── Wake word ──
+        if self.config.voice_mode == "wake_word":
+            # Check if wake words match ONNX models; otherwise use energy
+            onnx_words = [w for w in self.config.wake_words
+                         if w.lower() in ("alexa", "hey mycroft", "hey jarvis", "hey rhasspy")]
+            if onnx_words:
+                try:
+                    self.wake = WakeWordDetector(
+                        wake_words=self.config.wake_words,
+                        sample_rate=self.config.audio_sample_rate,
+                        sensitivity=self.config.wake_sensitivity,
+                    )
+                    print(f"[OCVoice] Wake word detector: openwakeword (onnx) — {onnx_words}")
+                except Exception as e:
+                    print(f"[OCVoice] openwakeword failed ({e}), using energy detector")
+                    self.wake = SimpleWakeWordDetector(
+                        wake_words=self.config.wake_words,
+                        sample_rate=self.config.audio_sample_rate,
+                        sensitivity=self.config.wake_sensitivity,
+                    )
+                    print("[OCVoice] Wake word detector: energy-based (STT-verified)")
+            else:
+                self.wake = SimpleWakeWordDetector(
+                    wake_words=self.config.wake_words,
+                    sample_rate=self.config.audio_sample_rate,
+                    sensitivity=self.config.wake_sensitivity,
+                )
+                print("[OCVoice] Wake word: energy-based (STT verifies wake word)")
+
+        # ── Speech-to-Text ──
+        try:
+            self.stt = SpeechToText(
+                backend=self.config.stt_backend,
+                local_model=self.config.stt_local_model,
+                local_device=self.config.stt_local_device,
+                local_compute_type=self.config.stt_local_compute_type,
+                api_key=self.config.stt_api_key,
+                fallback_to_api=self.config.stt_fallback_to_api,
+            )
+        except Exception as e:
+            print(f"[OCVoice] STT initialization error: {e}")
+            print("[OCVoice] Voice-to-text will not be available")
+            self.stt = None
+
+        # ── Vosk streaming STT ──
+        try:
+            from .speech.vosk_stt import VoskSTT
+            self._vosk = VoskSTT(lang="ru")
+            print(f"[OCVoice] Vosk STT ready (lang=ru)")
+        except Exception as e:
+            print(f"[OCVoice] Vosk init error: {e}")
+            self._vosk = None
+
+        # ── Speaker verification ──
+        self.speaker = SpeakerVerifier(
+            threshold=self.config.speaker_threshold,
+            enrollments_dir=self.config.speaker_enrollments_dir,
+            sample_rate=self.config.audio_sample_rate,
+        )
+        if self.config.speaker_enabled:
+            if self.speaker.is_enrolled():
+                print(f"[OCVoice] Speaker verification: ON (enrolled: {', '.join(self.speaker.list_enrollments())})")
+            else:
+                print("[OCVoice] Speaker verification: pending enrollment")
+                print("[OCVoice] Run 'ocvoice enroll' to register your voice")
+        else:
+            print("[OCVoice] Speaker verification: OFF")
+
+        # ── Intent parser ──
+        self.parser = IntentParser(
+            parser_type=self.config.intent_parser,
+            confidence_threshold=self.config.intent_confidence_threshold,
+        )
+
+        # ── UI: macOS → menu bar, Linux/Windows → system tray ──
+        import platform as _platform
+        if _platform.system() == "Darwin":
+            self.tray = None
+            if self.config.get("ui", "menubar", default=True):
+                self.menubar = MenuBarManager()
+                self.menubar.start(
+                    on_toggle=self._on_menubar_toggle,
+                    on_quit=self._on_menubar_quit,
+                    on_select_session=self._on_tray_select_session,
+                    on_select_project=self._on_tray_select_project,
+                    on_find_server=self._on_tray_find_server,
+                    on_new_session=self._on_tray_new_session,
+                )
+                print("[OCVoice] Menu bar: 🎤 в строке меню")
+            else:
+                self.menubar = None
+        else:
+            self.menubar = None
+            if self.config.tray_enabled:
+                self.tray = TrayManager()
+                self.tray.start(
+                    on_toggle=self._on_tray_toggle,
+                    on_exit=self._on_tray_exit,
+                    on_select_session=self._on_tray_select_session,
+                    on_select_project=self._on_tray_select_project,
+                    on_find_server=self._on_tray_find_server,
+                    on_new_session=self._on_tray_new_session,
+                )
+
+        # ── Floating overlay (disabled on macOS — requires main thread) ──
+        import platform
+        if platform.system() != "Darwin":
+            try:
+                self.overlay = OverlayManager()
+                self.overlay.start()
+            except Exception as e:
+                print(f"[OCVoice] Overlay unavailable: {e}")
+        else:
+            print("[OCVoice] Overlay: disabled on macOS (use menu bar instead)")
+            self.overlay = None
+
+        print("[OCVoice] Daemon initialized")
+        return True
+
+    def run(self):
+        """Main entry — menu bar on main thread, audio loop in background."""
+        if not self.setup():
+            print("[OCVoice] Failed to initialize. Exiting.")
+            return
+
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
+
+        self._running = True
+        self._init_state_session()
+        self._select_user_session()
+        self._set_state("waiting")
+
+        # Start audio in background thread
+        audio_thread = threading.Thread(target=self._audio_loop, daemon=True)
+        audio_thread.start()
+
+        # Start session poller in background thread
+        poller_thread = threading.Thread(target=self._session_poller, daemon=True)
+        poller_thread.start()
+
+        # Run menu bar on MAIN thread (required by macOS/rumps)
+        self._run_menu_bar()
+
+    def _audio_loop(self):
+        """Audio capture loop — runs in background thread, auto-recovers."""
+        print("[OCVoice] Daemon running. Speak your commands.")
+        if self.config.voice_mode == "wake_word":
+            print(f"[OCVoice] Wake words: {', '.join(self.config.wake_words)}")
+
+        retry_count = 0
+        max_retries = 5
+
+        while self._running and retry_count < max_retries:
+            try:
+                self.capture.stop()
+            except Exception:
+                pass
+            self.capture = AudioCapture(
+                sample_rate=self.config.audio_sample_rate,
+                channels=self.config.audio_channels,
+                device_id=self.config.audio_device,
+                chunk_size=self.config.audio_chunk_size,
+            )
+            try:
+                self.capture.start()
+                self._main_loop()
+            except Exception as e:
+                retry_count += 1
+                import traceback
+                print(f"[OCVoice] Audio loop error (#{retry_count}): {e}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+                print(f"[OCVoice] Restarting audio capture in 3s...", file=sys.stderr)
+                try:
+                    self.capture.stop()
+                except Exception:
+                    pass
+                time.sleep(3)
+
+        if retry_count >= max_retries:
+            print("[OCVoice] Too many audio errors — daemon stopping", file=sys.stderr)
+        else:
+            print("[OCVoice] Audio loop ended", file=sys.stderr)
+
+    def _run_menu_bar(self):
+        """Run the menu bar on the main thread (macOS requirement)."""
+        if self.menubar and self.menubar._app:
+            try:
+                self.menubar._app.run()
+            except Exception as e:
+                print(f"[OCVoice] Menu bar error: {e}")
+        else:
+            # No menu bar — just wait for Ctrl+C
+            try:
+                while self._running:
+                    time.sleep(0.5)
+            except KeyboardInterrupt:
+                pass
+
+        self.shutdown()
+
+    def _main_loop(self):
+        """Core audio processing loop — resilient to per-iteration errors."""
+        mode = self.config.voice_mode
+        chunk_size = self.config.audio_chunk_size
+        last_heartbeat = time.time()
+
+        while self._running:
+            try:
+                # Read audio chunk
+                chunk = self.capture.read(chunk_size, timeout=0.1)
+                if len(chunk) == 0:
+                    continue
+
+                if not self._listening:
+                    continue
+
+                # Heartbeat + state safety
+                if time.time() - last_heartbeat > 60:
+                    self._set_state(self._state)
+                    # Safety: если "awaiting" висит больше 20с → сброс
+                    if self._state == "awaiting" and time.time() - self._state_since > 20:
+                        self._set_state("ready")
+                    print(f"[OCVoice] Heartbeat: listening={self._listening}, "
+                          f"model={self._current_model.split('/')[-1]}, agent={self._current_agent}",
+                          file=sys.stderr, flush=True)
+                    last_heartbeat = time.time()
+
+                # ── Mode: wake_word ──
+                if mode == "wake_word":
+                    self._process_wake_word_mode(chunk)
+
+                # ── Mode: always_on ──
+                elif mode == "always_on":
+                    self._process_always_on_mode(chunk)
+
+                # ── Mode: push_to_talk ──
+                elif mode == "push_to_talk":
+                    time.sleep(0.05)
+
+            except Exception as e:
+                print(f"[OCVoice] Loop iteration error: {e}", file=sys.stderr, flush=True)
+                time.sleep(0.5)  # Don't spin on repeated failures
+
+    def _process_wake_word_mode(self, chunk: np.ndarray):
+        """Vosk stream mode: каждый чанк → Vosk → проверка в реальном времени."""
+        if not self._vosk:
+            return
+
+        # Накапливаем аудио для speaker verification (последние 3с)
+        self._verify_buffer.append(chunk)
+        max_verify = int(3.0 * self.config.audio_sample_rate)
+        verify_len = sum(len(c) for c in self._verify_buffer)
+        while verify_len > max_verify * 3:  # trim if too big
+            self._verify_buffer.pop(0)
+            verify_len = sum(len(c) for c in self._verify_buffer)
+
+        self._vosk.process(chunk)
+        partial = self._vosk.get_partial()
+
+        import re
+        partial_clean = re.sub(r'[^\w\s]', '', partial.lower())
+
+        # Vosk-специфичные fuzzy варианты (small model часто путает)
+        vosk_fuzzy = {
+            "окей кот": "окей код", "окей код": "окей код",
+            "оке": "окей", "кейкот": "окей код", "кей код": "окей код",
+            "окикот": "окей код", "окейкут": "окей код",
+            "окей ко": "окей код", "окейкат": "окей код",
+            "о кей": "окей", "окей": "окей",
+        }
+
+        if not self._cmd_mode:
+            # ── IDLE: ищем wake word в partial ──
+            wake_match = None
+            for ww in self.config.wake_words:
+                ww_c = re.sub(r'[^\w\s]', '', ww.lower())
+                # 1. Прямое совпадение
+                if ww_c in partial_clean:
+                    wake_match = ww_c
+                    break
+                # 2. Fuzzy match
+                if self._fuzzy_wake_match(partial_clean, ww_c):
+                    wake_match = ww_c
+                    break
+                # 3. Vosk fuzzy variants
+                for vosk_w, real_w in vosk_fuzzy.items():
+                    if vosk_w in partial_clean and real_w == ww_c:
+                        wake_match = vosk_w
+                        break
+                if wake_match:
+                    break
+                # 4. Быстрая проверка: "ок" + любое слово на "к" в пределах 3 слов
+                words = partial_clean.split()
+                for i, w in enumerate(words):
+                    if w.startswith("ок") or w.startswith("ok"):
+                        for j in range(i+1, min(i+4, len(words))):
+                            if words[j].startswith("к"):
+                                wake_match = f"{w} {words[j]}"
+                                break
+                    if wake_match:
+                        break
+                if wake_match:
+                    break
+
+            if wake_match:
+                # Используем накопленный буфер для verification
+                if len(self._verify_buffer) > 0:
+                    verify_audio = np.concatenate(self._verify_buffer)
+                    # Берём только последние 0.5с (8000 samples)
+                    if len(verify_audio) > max_verify:
+                        verify_audio = verify_audio[-max_verify:]
+                else:
+                    verify_audio = chunk
+
+                if self.speaker and self.config.speaker_enabled:
+                    v = self.speaker.verify(verify_audio)
+                    score = v.get("score", 0)
+                    if score < 0.1:  # Sanity check: score < 0.1 → модель не работает
+                        print(f"[OCVoice] 🔍 Wake '{wake_match}' score={score:.2f} — skip verify (model issue)", flush=True)
+                    elif not v.get("match", False):
+                        print(f"[OCVoice] 🔍 Wake '{wake_match}' voice mismatch ({v.get('score',0):.2f}) — ignored", flush=True)
+                        return
+                # ✅ Wake word + speaker verified
+                self._beep(1000, 0.2)
+                if self._vosk:
+                    self._vosk.reset()  # Чистый Vosk — старый текст не попадёт
+                self._cmd_mode = True
+                self._cmd_text = ""
+                self._cmd_longest = ""
+                self._cmd_paused = False
+                self._cmd_paused_at = 0
+                self._vad_cmd_buffer = np.array([], dtype=np.float32)
+                self._cmd_last_partial = ""
+                self._cmd_silence_since = time.time()
+                self._cmd_start = time.time()
+                self._set_state("cmd")
+                print(f"[OCVoice] 🟡 CMD START (vosk): partial=\"{partial}\"", flush=True)
+                return
+            return
+
+        # ── CMD: используем partial (вся речь целиком) + finals ──
+        finals = self._vosk.get_final_since_last_check()
+        for f in finals:
+            self._cmd_text += " " + f
+        self._cmd_text = re.sub(r'\s+', ' ', self._cmd_text).strip()
+
+        # Полный текст = накопленные finals + текущий partial
+        full_text = self._cmd_text
+        if partial:
+            full_text = (full_text + " " + partial).strip()
+        full_clean = re.sub(r'[^\w\s]', '', full_text.lower())
+
+        # Сохраняем самую длинную версию (Vosk partial может "съёживаться")
+        if len(full_text) > len(getattr(self, '_cmd_longest', '')):
+            self._cmd_longest = full_text
+
+        # Ищем end phrase в полном тексте (стандартные + Vosk-специфичные)
+        from .intent.intents import END_PHRASES_RU, END_PHRASES_EN
+        vosk_eps = ["отправь", "отправ", "отправи"]
+        all_eps = list(END_PHRASES_RU) + list(END_PHRASES_EN) + vosk_eps
+        for ep in sorted(all_eps, key=len, reverse=True):
+            ep_c = re.sub(r'[^\w\s]', '', ep.lower())
+            if f" {ep_c} " in f" {full_clean} " or full_clean.endswith(f" {ep_c}"):
+                # Используем самую длинную версию текста
+                longest = getattr(self, '_cmd_longest', full_text)
+                longest_clean = re.sub(r'[^\w\s]', '', longest.lower())
+                if f" {ep_c} " in f" {longest_clean} " or longest_clean.endswith(f" {ep_c}"):
+                    cmd = longest_clean.rsplit(ep_c, 1)[0].strip()
+                    print(f"[OCVoice] 🔍 EP match: '{ep}' in '{longest_clean[:100]}...'", flush=True)
+                else:
+                    cmd = full_clean.rsplit(ep_c, 1)[0].strip()
+                print(f"[OCVoice] 🏁 End phrase '{ep}' FOUND! Sending: \"{cmd}\"", flush=True)
+                self._cmd_mode = False
+                self._cmd_text = ""
+                if self._vosk:
+                    self._vosk.reset()
+                if cmd:
+                    self._beep(800, 0.1)
+                    print(f"[OCVoice] ✅ Sending: \"{cmd}\"", flush=True)
+                    threading.Thread(target=self._execute_command_from_text, args=(cmd,), daemon=True).start()
+                return
+
+        # Показываем partial + отслеживаем тишину через VAD
+        if partial:
+            if partial != self._cmd_last_partial:
+                self._cmd_silence_since = time.time()
+                self._cmd_last_partial = partial
+            print(f"[OCVoice] 📝 CMD partial: \"{full_text[:80]}...\"", flush=True)
+
+        # VAD: детектим конец речи (только для таймера, не отправляем)
+        self._vad_cmd_buffer = np.concatenate([self._vad_cmd_buffer, chunk])
+        while self.vad and len(self._vad_cmd_buffer) >= self.vad.frame_size:
+            frame = self._vad_cmd_buffer[:self.vad.frame_size]
+            self._vad_cmd_buffer = self._vad_cmd_buffer[self.vad.frame_size:]
+            result = self.vad.process(frame)
+            if result.get("speech_ended"):
+                if not getattr(self, '_cmd_paused', False):
+                    self._cmd_paused = True
+                    self._cmd_paused_at = time.time()
+            elif result.get("speech_started"):
+                self._cmd_paused = False
+
+        # Таймер: 10 секунд тишины → авто-отправка
+        if getattr(self, '_cmd_paused', False) and time.time() - self._cmd_paused_at > 10:
+            print(f"[OCVoice] ⏰ 10s silence — auto-send: \"{full_text[:60]}...\"", flush=True)
+            self._cmd_mode = False
+            self._cmd_text = ""
+            self._vosk.reset()
+            if full_clean.strip():
+                self._set_state("sending")
+                self._beep(800, 0.1)
+                threading.Thread(target=self._execute_command_from_text, args=(full_clean,), daemon=True).start()
+            else:
+                self._set_state("waiting")
+
+    def _fuzzy_wake_match(self, text: str, wake: str) -> bool:
+        """Fuzzy wake word matching — check if wake word is near in text."""
+        parts = wake.split()
+        if len(parts) < 2:
+            return wake in text
+        words = text.split()
+        for i, w in enumerate(words):
+            if w.startswith(parts[0][:2]) or w.startswith("кей"):
+                for j in range(i+1, min(i+4, len(words))):
+                    if words[j].startswith(parts[1][:2]) or words[j].startswith("ко") or words[j].startswith("ка"):
+                        return True
+        return False
+
+    def _execute_command_from_text(self, text: str):
+        """Execute a command from transcribed text (CMD path)."""
+        from .intent.parser import IntentParser
+        parser = IntentParser(parser_type=self.config.intent_parser)
+        cmd = parser.parse(text)
+        print(f"[OCVoice] 🔍 Parser ({self.config.intent_parser}): \"{text}\" → {cmd.intent.name} conf={cmd.confidence}", flush=True)
+        if cmd.intent != Intent.SEND_MESSAGE and cmd.intent != Intent.UNKNOWN:
+            self._show_in_tui(text, cmd)
+            self._execute_command(cmd)
+            return
+
+        # SEND_MESSAGE — async отправка (не ждём ответ AI)
+        if not self.client or not self.client.session_id:
+            print(f"[OCVoice] ❌ Нет сессии для отправки", flush=True)
+            self._set_state("waiting")
+            return
+
+        try:
+            self.client.send_prompt_async(text)
+            print(f"[OCVoice] ✅ Отправлено асинхронно", flush=True)
+            self._set_state("ready")
+            self._beep(1200, 0.08)
+        except Exception as e:
+            print(f"[OCVoice] ❌ Ошибка async: {e}", flush=True)
+            self._set_state("waiting")
+            self._send_message(text)
+
+    def _process_always_on_mode(self, chunk: np.ndarray):
+        """Always-on mode: continuously listen and detect speech segments."""
+        if not self.vad:
+            return
+
+        result = self.vad.process(chunk)
+
+        if result.get("speech_started"):
+            self._speaking = True
+            self._audio_buffer = []
+
+        if self._speaking:
+            self._audio_buffer.append(chunk)
+
+            if result.get("speech_ended"):
+                self._process_speech_buffer()
+                self._speaking = False
+                self._audio_buffer = []
+
+            # Safety limit
+            buf_len = len(self._audio_buffer)
+            max_frames = int(self.config.max_duration * self.config.audio_sample_rate / self.config.audio_chunk_size)
+            if buf_len > max_frames:
+                self._process_speech_buffer()
+                self._speaking = False
+                self._audio_buffer = []
+
+    def _process_speech_buffer(self):
+        """Process collected speech audio: STT → Verify → Parse → Execute."""
+        if not self._audio_buffer:
+            return
+
+        audio = np.concatenate(self._audio_buffer)
+        self._audio_buffer = []
+
+        # Minimum speech length (1.0 seconds) — skip short clicks/pops
+        min_samples = int(1.0 * self.config.audio_sample_rate)
+        if len(audio) < min_samples:
+            return
+
+        print(f"[OCVoice] Processing {len(audio) / self.config.audio_sample_rate:.1f}s of audio...")
+        if self.tray:
+            self.tray.update("processing")
+
+        # ── Step 1: Speech-to-Text ──
+        if not self.stt:
+            print("[OCVoice] STT not available")
+            return
+
+        result = self.stt.transcribe(audio, self.config.audio_sample_rate)
+        text = result.get("text", "").strip()
+
+        if not text:
+            print("[OCVoice] No speech recognized")
+            return
+
+        print(f"[OCVoice] Recognized [{result.get('language', '?')}]: \"{text}\"")
+        print(f"[OCVoice] Backend: {result.get('backend', '?')}, "
+              f"Confidence: {result.get('confidence', 0):.2f}")
+
+        # ── Step 1.5: Wake word verification (for wake_word mode) ──
+        if self.config.voice_mode == "wake_word":
+            import re
+            # Normalize: lowercase, remove punctuation
+            text_clean = re.sub(r'[^\w\s]', '', text.lower())
+            text_clean = re.sub(r'\s+', ' ', text_clean).strip()
+
+            wake_found = False
+            for ww in self.config.wake_words:
+                ww_clean = re.sub(r'[^\w\s]', '', ww.lower()).strip()
+                # Check anywhere in text
+                if ww_clean in text_clean:
+                    wake_found = True
+                    idx = text_clean.find(ww_clean)
+                    text = text_clean[:idx] + text_clean[idx + len(ww_clean):]
+                    text = text.strip()
+                    break
+                # Also check if individual words of wake word appear near each other
+                ww_parts = ww_clean.split()
+                if len(ww_parts) == 2:
+                    # "окей" followed by "код" within 3 words
+                    words = text_clean.split()
+                    for j in range(len(words) - 1):
+                        if words[j].startswith(ww_parts[0][:3]) and len(words) > j + 1:
+                            # Check next 3 words for the second part
+                            for k in range(j+1, min(j+4, len(words))):
+                                if words[k].startswith(ww_parts[1][:2]):
+                                    wake_found = True
+                                    text = ' '.join(words[:j] + words[k+1:]).strip()
+                                    print(f"[OCVoice] Wake word spread match: '{' '.join(words[j:k+1])}'")
+                                    break
+                        if wake_found:
+                            break
+
+            # Fuzzy fallback: check common misrecognitions
+            if not wake_found:
+                fuzzy_map = {
+                    "окей кот": "окей код", "окей code": "hey code",
+                    "okay code": "hey code", "эй код": "окей код",
+                    "хей код": "окей код", "окейкот": "окей код",
+                    "кейкот": "окей код", "окейкод": "окей код",
+                    "окей кат": "окей код", "окей ко": "окей код",
+                    "окикут": "окей код", "окейкут": "окей код",
+                    "окейкот": "окей код", "окейкод": "окей код",
+                    "hey code": "hey code", "окей кот": "окей код",
+                }
+                for fuzzy, real in fuzzy_map.items():
+                    if fuzzy in text_clean:
+                        wake_found = True
+                        idx = text_clean.find(fuzzy)
+                        text = text_clean[:idx] + text_clean[idx + len(fuzzy):]
+                        text = text.strip()
+                        print(f"[OCVoice] Wake word fuzzy match: '{fuzzy}' → '{real}'")
+                        break
+            
+            # Additional: check if "оке" or "okay" + "код/кот/код" appear nearby
+            if not wake_found:
+                words = text_clean.split()
+                for j, w in enumerate(words):
+                    if w.startswith("ок") or w.startswith("ok") or w.startswith("кей") or w.startswith("oke") or w.startswith("оки") or w.startswith("ки"):
+                        # Look for "код", "кот", "кад", "code" in next 4 words
+                        for k in range(j+1, min(j+6, len(words))):
+                            wk = words[k]
+                            if wk.startswith("ко") or wk.startswith("ка") or wk.startswith("cad") or wk == "code" or wk.startswith("код"):
+                                wake_found = True
+                                text = ' '.join(words[:j] + words[k+1:]).strip()
+                                print(f"[OCVoice] Wake word nearby match: '{' '.join(words[j:k+1])}'")
+                                break
+                    if wake_found:
+                        break
+
+            if not wake_found:
+                print("[OCVoice] No wake word in transcript — ignoring")
+                self._quiet_until = time.time() + 3.0
+                return
+
+            # ── End phrase check ──
+            from .intent.intents import END_PHRASES_RU, END_PHRASES_EN
+            
+            # Quick pre-check: if it's a direct command (not a message), allow immediately
+            quick_intent = self.parser.parse(text)
+            if quick_intent.intent in (Intent.STOP_LISTENING, Intent.START_LISTENING,
+                                        Intent.NEW_SESSION, Intent.SWITCH_MODEL,
+                                        Intent.SWITCH_MODE, Intent.TOGGLE_THINKING,
+                                        Intent.UNDO, Intent.REDO, Intent.SHARE,
+                                        Intent.COMPACT, Intent.LIST_SESSIONS):
+                pass  # Commands execute immediately, no end phrase needed
+            else:
+                # For send_message: require end phrase
+                all_end_phrases = END_PHRASES_RU + END_PHRASES_EN
+                end_found = False
+
+                # Phase 1: Exact match (preferred)
+                for ep in sorted(all_end_phrases, key=len, reverse=True):
+                    ep_clean = re.sub(r'[^\w\s]', '', ep.lower()).strip()
+                    if f" {ep_clean} " in f" {text} " or text.endswith(f" {ep_clean}"):
+                        parts = text.rsplit(f" {ep_clean}", 1)
+                        text = parts[0].strip()
+                        end_found = True
+                        print(f"[OCVoice] End phrase detected: '{ep}' → sending")
+                        break
+
+                # Phase 2: Fuzzy match (fallback, only if no exact match)
+                if not end_found:
+                    text_words = text.split()
+                    for ep in sorted(all_end_phrases, key=len, reverse=True):
+                        ep_clean = re.sub(r'[^\w\s]', '', ep.lower()).strip()
+                        # Only check last 3 words — end phrase should be at the end
+                        for j in range(max(0, len(text_words)-3), len(text_words)):
+                            tw = text_words[j]
+                            if len(tw) >= 4 and len(ep_clean) >= 4:
+                                if tw.startswith(ep_clean[:5]):
+                                    before = ' '.join(text_words[:j]).strip()
+                                    after = ' '.join(text_words[j+1:]).strip()
+                                    text = f"{before} {after}".strip() if before and after else (before or after)
+                                    end_found = True
+                                    print(f"[OCVoice] End phrase fuzzy: '{tw}' → '{ep_clean}' → sending")
+                                    break
+                        if end_found:
+                            break
+
+                if not end_found and text.strip():
+                    # Shortcut: if text is very short and clearly a command, allow it
+                    if len(text.split()) <= 3:
+                        print(f"[OCVoice] Short command, auto-sending: \"{text}\"")
+                    else:
+                        print(f"[OCVoice] Say end phrase to send ('отправь'/'я закончил'/'done')")
+                        print(f"[OCVoice] Heard: \"{text}\"")
+                        return
+
+        # ── Step 2: Speaker Verification ──
+        # ✅ BEEP #2: end phrase confirmed
+        time.sleep(0.3)
+        self._beep(1200, 0.08)
+        self._set_state("sending")
+        
+        if self.speaker and self.config.speaker_enabled:
+            if self.speaker.is_enrolled():
+                verify = self.speaker.verify(audio)
+                if not verify["match"]:
+                    print(f"[OCVoice] Speaker verification FAILED (score: {verify['score']:.2f}, "
+                          f"threshold: {self.config.speaker_threshold})")
+                    print("[OCVoice] Ignoring — voice does not match enrolled speaker")
+                    return
+                print(f"[OCVoice] Speaker verified (score: {verify['score']:.2f})")
+            else:
+                print("[OCVoice] Run 'ocvoice enroll' to verify only your voice")
+
+        # ── Step 3: Intent Parsing ──
+        command = self.parser.parse(text)
+        print(f"[OCVoice] Intent: {command.intent.value} (confidence: {command.confidence:.2f})", flush=True)
+
+        # ── Step 3.5: Show recognition in OpenCode TUI ──
+        self._show_in_tui(text, command)
+
+        # ── Step 4: Execute in background thread (non-blocking) ──
+        threading.Thread(
+            target=self._execute_command,
+            args=(command,),
+            daemon=True,
+        ).start()
+
+    def _show_in_tui(self, text: str, command: ParsedCommand):
+        """Show recognized voice command via menu bar notification."""
+        lang_icon = "🇷🇺" if any('а' <= c <= 'я' for c in text.lower()) else "🇬🇧"
+        print(f"\n{'─'*50}")
+        print(f"  {lang_icon} Распознано: \"{text}\"")
+        print(f"  🎯 Команда: {command.intent.value}")
+        print(f"{'─'*50}")
+        sys.stdout.flush()
+
+        if self.menubar:
+            self.menubar.notify(f"OCVoice {lang_icon}", text)
+
+    def _show_response(self, text: str):
+        """Show AI response via menu bar notification."""
+        if self.menubar:
+            short = text[:200] + ("..." if len(text) > 200 else "")
+            self.menubar.notify("OCVoice ✅", short)
+
+    def _execute_command(self, command: ParsedCommand):
+        """Execute the parsed command against OpenCode."""
+        try:
+            match command.intent:
+                case Intent.STOP_LISTENING:
+                    self._listening = False
+                    self._set_state("stopped")
+                    print("[OCVoice] Listening paused. Say wake word to resume.")
+                    if self.tray:
+                        self.tray.update("stopped")
+                    if self.menubar:
+                        self.menubar.update_status("stopped")
+
+                case Intent.START_LISTENING:
+                    self._listening = True
+                    print("[OCVoice] Listening resumed.")
+                    if self.tray:
+                        self.tray.update("listening")
+
+                case Intent.NEW_SESSION:
+                    self._ensure_connected()
+                    session = self.client.create_session("🎤 Новая сессия")
+                    self.client.session_id = session.get('id')
+                    self._manual_session_until = time.time() + 30
+                    print(f"  ✅ Новая сессия: {session.get('id', '?')[:16]}...", flush=True)
+                    print(f"  💡 Переключитесь на неё в OpenCode (Ctrl+X L)", flush=True)
+
+                case Intent.CURRENT_PROJECT:
+                    self._ensure_connected()
+                    try:
+                        proj = self.client.get_current_project()
+                        name = proj.get('worktree', '?').split('/')[-1] or proj.get('id', '?')
+                        print(f"  📁 Проект: {name} ({proj.get('worktree', '?')})", flush=True)
+                        self._notify("OCVoice 📁", f"Проект: {name}")
+                    except Exception as e:
+                        print(f"[OCVoice] ❌ Не удалось получить проект: {e}", flush=True)
+
+                case Intent.CURRENT_SESSION:
+                    self._ensure_connected()
+                    sid = self.client.session_id
+                    if not sid:
+                        print("  ❌ Нет активной сессии", flush=True)
+                    else:
+                        try:
+                            s = self.client.get_session(sid)
+                            title = s.get('title', 'untitled')
+                            print(f"  💬 Сессия: {title} ({sid[:16]}...)", flush=True)
+                            self._notify("OCVoice 💬", f"Сессия: {title}")
+                        except Exception:
+                            print(f"  ❌ Сессия {sid[:16]}... недоступна", flush=True)
+                    try:
+                        proj = self.client.get_current_project()
+                        pname = proj.get('worktree', '?').split('/')[-1] or proj.get('id', '?')
+                        print(f"  📁 Проект: {pname}", flush=True)
+                    except Exception:
+                        pass
+                    print(f"  🔗 {self.client.client.base_url}", flush=True)
+
+                case Intent.LIST_PROJECTS:
+                    self._ensure_connected()
+                    try:
+                        projects = self.client.list_projects()
+                        print(f"[OCVoice] Проекты ({len(projects)}):", flush=True)
+                        for i, p in enumerate(projects, 1):
+                            name = p.get('worktree', '?').split('/')[-1] or p.get('id', '?')
+                            print(f"  {i}. {name} ({p.get('worktree', '?')})", flush=True)
+                        print("  💡 Выбрать проект мышкой в IDE", flush=True)
+                    except Exception as e:
+                        print(f"[OCVoice] ❌ Ошибка: {e}", flush=True)
+
+                case Intent.SWITCH_PROJECT:
+                    self._ensure_connected()
+                    try:
+                        proj = self.client.get_current_project()
+                        name = proj.get('worktree', '?').split('/')[-1] or proj.get('id', '?')
+                        print(f"  📁 Текущий проект: {name}", flush=True)
+                        print(f"  💡 Переключи проект мышкой в OpenCode IDE,", flush=True)
+                        print(f"     затем скажи 'найди сервер' для переподключения", flush=True)
+                    except Exception as e:
+                        print(f"[OCVoice] ❌ Ошибка: {e}", flush=True)
+
+                case Intent.REDISCOVER:
+                    print(f"[OCVoice] 🔍 Поиск сервера...", flush=True)
+                    if self._recheck_ide_server():
+                        self._select_user_session()
+                        print(f"  ✅ Сервер обновлён", flush=True)
+                        try:
+                            proj = self.client.get_current_project()
+                            name = self._extract_project_name(proj)
+                            print(f"  📁 Проект: {name}", flush=True)
+                        except Exception:
+                            pass
+                        sid = self.client.session_id
+                        if sid:
+                            try:
+                                s = self.client.get_session(sid)
+                                print(f"  💬 Сессия: {s.get('title', 'untitled')}", flush=True)
+                            except Exception:
+                                pass
+                    else:
+                        print(f"  ❌ Сервер не найден", flush=True)
+
+                case Intent.SWITCH_MODEL:
+                    model_name = command.arguments.get("model", command.text)
+                    self._current_model = model_name
+                    self._ensure_connected()
+                    self.client.update_config({"model": model_name})
+                    msg = f"Модель: {model_name}"
+                    print(f"  ✅ {msg}", flush=True)
+                    if self._headless:
+                        self._notify("OCVoice 🤖", msg)
+
+                case Intent.SWITCH_MODE:
+                    agent = command.arguments.get("agent", "build")
+                    self._current_agent = agent
+                    self._ensure_connected()
+                    self.client.update_config({"default_agent": agent})
+                    msg = f"Режим: {agent}"
+                    print(f"  ✅ {msg}", flush=True)
+                    if self._headless:
+                        self._notify("OCVoice 🔄", msg)
+
+                case Intent.TOGGLE_THINKING:
+                    self._ensure_connected()
+                    enable = command.arguments.get("enable", True)
+                    action = "включен" if enable else "отключен"
+                    try:
+                        self.client.execute_command("thinking")
+                    except Exception:
+                        pass
+                    print(f"  ✅ Thinking {action}", flush=True)
+
+                case Intent.SWITCH_AGENT:
+                    agent = command.arguments.get("agent", command.text)
+                    self._current_agent = agent
+                    self._ensure_connected()
+                    self.client.update_config({"default_agent": agent})
+                    print(f"  ✅ Агент: {agent}", flush=True)
+
+                case Intent.SEND_MESSAGE:
+                    self._ensure_connected()
+                    self._send_message(command.text)
+
+                case Intent.UNDO:
+                    self._ensure_connected()
+                    self.client.execute_command("undo")
+                    print("[OCVoice] Undo executed")
+
+                case Intent.REDO:
+                    self._ensure_connected()
+                    self.client.execute_command("redo")
+                    print("[OCVoice] Redo executed")
+
+                case Intent.COMPACT:
+                    self._ensure_connected()
+                    self.client.execute_command("compact")
+                    print("[OCVoice] Context compacted")
+
+                case Intent.SHARE:
+                    self._ensure_connected()
+                    result = self.client.execute_command("share")
+                    print("[OCVoice] Session shared")
+
+                case Intent.LIST_SESSIONS:
+                    self._ensure_connected()
+                    sessions = self.client.list_sessions()
+                    user_sessions = [s for s in sessions
+                                     if '[OCVoice]' not in s.get('title', '')]
+                    print(f"[OCVoice] Сессии ({len(user_sessions)}):", flush=True)
+                    for i, s in enumerate(user_sessions, 1):
+                        marker = " ◄" if s.get('id') == self.client.session_id else ""
+                        print(f"  {i}. {s.get('title', 'untitled')} ({s['id'][:8]}...){marker}", flush=True)
+
+                case Intent.SWITCH_SESSION:
+                    self._ensure_connected()
+                    query = command.arguments.get("session", command.text).strip().lower()
+                    sessions = self.client.list_sessions()
+                    user_sessions = [s for s in sessions
+                                     if '[OCVoice]' not in s.get('title', '')]
+                    matches = [s for s in user_sessions if query in s.get('title', '').lower()]
+                    if len(matches) == 1:
+                        self.client.session_id = matches[0]['id']
+                        self._manual_session_until = time.time() + 30
+                        self._beep(880, 0.08)
+                        print(f"  ✅ Сессия: {matches[0]['title']} ({matches[0]['id'][:16]}...)", flush=True)
+                    elif len(matches) > 1:
+                        print(f"[OCVoice] Найдено несколько сессий:", flush=True)
+                        for i, s in enumerate(matches, 1):
+                            print(f"  {i}. {s['title']} ({s['id'][:8]}...)", flush=True)
+                        print("  Уточни название", flush=True)
+                    else:
+                        print(f"[OCVoice] Сессия \"{query}\" не найдена", flush=True)
+                        print("  Скажи: список сессий", flush=True)
+
+                case Intent.EXECUTE_COMMAND:
+                    self._ensure_connected()
+                    cmd = command.arguments.get("command", command.text)
+                    self.client.execute_command(cmd)
+                    print(f"[OCVoice] Command executed: {cmd}")
+
+                case Intent.RUN_SHELL:
+                    self._ensure_connected()
+                    cmd = command.arguments.get("command", command.text)
+                    self.client.run_shell(cmd)
+                    print(f"[OCVoice] Shell command: {cmd}")
+
+                case Intent.UNKNOWN:
+                    print(f"[OCVoice] Unknown command: \"{command.text}\"")
+
+                case _:
+                    print(f"[OCVoice] Unhandled intent: {command.intent}")
+
+        except Exception as e:
+            print(f"[OCVoice] Command execution error: {e}")
+            if self.tray:
+                self.tray.update("error")
+        else:
+            if self.tray and command.intent not in (Intent.STOP_LISTENING, Intent.START_LISTENING):
+                self.tray.update("ready")
+
+    def _init_state_session(self):
+        """Create the status indicator session and clean up old ones."""
+        import httpx
+        try:
+            base = str(self.client.client.base_url)
+            auth = self.client.client._auth
+            r = httpx.post(
+                f"{base}/session",
+                auth=auth,
+                json={"title": "🎤 OCVoice"},
+                timeout=5,
+            )
+            if r.status_code == 200:
+                self._state_session_id = r.json().get("id")
+                print(f"[OCVoice] 📊 Status session: {self._state_session_id[:16]}...")
+        except Exception as e:
+            print(f"[OCVoice] Status session create: {e}")
+
+        if self._state_session_id:
+            try:
+                for s in self.client.list_sessions():
+                    title = s.get('title', '')
+                    sid = s.get('id')
+                    if 'OCVoice' in title and sid != self._state_session_id:
+                        self.client.delete_session(sid)
+                        print(f"[OCVoice] 🗑 Deleted old status session: {sid[:16]}...")
+            except Exception as e:
+                print(f"[OCVoice] Cleanup old sessions: {e}")
+
+    def _recheck_ide_server(self, target_port=None):
+        """Rediscover OpenCode server when the current one is unreachable.
+
+        If target_port is given, connect to that specific port directly
+        (used by CLI 'ocv select project'). Otherwise scan all ports.
+        """
+        from .opencode.ide_discovery import IDEDiscovery
+
+        if target_port:
+            new_url = f"http://127.0.0.1:{target_port}"
+            import httpx
+            pw = os.environ.get("OPENCODE_SERVER_PASSWORD", "")
+            auth = ("opencode", pw) if pw else None
+            try:
+                r = httpx.get(f"{new_url}/session", auth=auth, timeout=2)
+                if r.status_code != 200:
+                    print(f"[OCVoice] ❌ Проект на порту {target_port} недоступен", flush=True)
+                    return False
+            except Exception:
+                print(f"[OCVoice] ❌ Нет соединения с портом {target_port}", flush=True)
+                return False
+        else:
+            ide = IDEDiscovery()
+            if not ide.discover():
+                return False
+            new_url = ide.base_url.rstrip("/")
+            auth = ide.auth
+
+        current_url = str(self.client.client.base_url).rstrip("/") if self.client else ""
+        if new_url == current_url:
+            return True
+
+        print(f"[OCVoice] 🔄 Переключение на сервер: {new_url}", flush=True)
+        self._beep(500, 0.12)
+        time.sleep(0.08)
+        self._beep(800, 0.15)
+        if self.client:
+            self.client.close()
+        self.client = OpenCodeClient(base_url=new_url, auth=auth)
+        self._state_session_id = None
+        self._init_state_session()
+        self._select_user_session()
+        return True
+
+    def _select_user_session(self):
+        """Select the most recently updated user session and fill timestamp cache."""
+        if not self.client:
+            return
+        try:
+            sessions = self.client.list_sessions()
+            user_sessions = [s for s in sessions
+                             if '[OCVoice]' not in s.get('title', '')
+                             and s.get('id') != self._state_session_id]
+            # Fill timestamp cache for all user sessions
+            for s in sessions:
+                self._session_timestamps[s['id']] = s.get('time', {}).get('updated', 0)
+            if user_sessions:
+                latest = max(user_sessions, key=lambda s: s.get('time', {}).get('updated', 0))
+                self.client.session_id = latest['id']
+                title = latest.get('title', 'untitled')
+                print(f"  📋 Сессия: {title} ({latest['id'][:16]}...)", flush=True)
+            else:
+                s = self.client.create_session("Новый проект")
+                self.client.session_id = s.get('id')
+                print(f"  📋 Новая сессия: {s.get('id', '?')[:16]}...", flush=True)
+        except Exception:
+            pass
+
+    def _session_poller(self):
+        """Background thread: track session + server updates, IPC commands, tray menu."""
+        poll_count = 0
+        while self._running:
+            # ── IPC: read CLI commands ──
+            try:
+                cmd = read_command()
+                if cmd:
+                    self._handle_ipc_command(cmd)
+                    clear_command()
+            except Exception:
+                pass
+
+            # ── Session tracking ──
+            try:
+                self._check_session_changes()
+            except Exception:
+                pass
+
+            # ── UI menu update (tray or menubar) ──
+            try:
+                self._update_ui_menu()
+            except Exception:
+                pass
+
+            poll_count += 1
+            if poll_count % 5 == 0:
+                try:
+                    self._recheck_ide_server()
+                except Exception:
+                    pass
+            time.sleep(2.0)
+
+    def _handle_ipc_command(self, cmd: dict):
+        """Handle a command received from CLI via IPC file."""
+        c = cmd.get('cmd')
+        if c == 'select_session':
+            session_id = cmd.get('session_id')
+            if session_id and self.client:
+                self.client.session_id = session_id
+                self._manual_session_until = time.time() + 30
+                self._beep(880, 0.1)
+                print(f"[OCVoice] 📋 IPC: переключено на сессию {session_id[:16]}...", flush=True)
+        elif c == 'select_project':
+            worktree = cmd.get('worktree')
+            if worktree:
+                self._on_tray_select_project(worktree)
+            port = cmd.get('port')
+            if port:
+                name = cmd.get('project_name', f'port:{port}')
+                print(f"[OCVoice] 📁 IPC: переключено на проект '{name}'", flush=True)
+        elif c == 'find_server':
+            self._recheck_ide_server()
+        elif c == 'new_session':
+            self._on_tray_new_session()
+
+    def _update_ui_menu(self):
+        """Fetch current data and push to tray or menubar."""
+        if not self.client:
+            return
+        sessions = self._get_db_sessions_for_selected_project()
+        projects = self.client.list_projects()
+        current_project = {}
+        try:
+            current_project = self.client.get_current_project()
+        except Exception:
+            pass
+        all_projects = self._read_opencode_db_projects()
+
+        # Mark current — find which project matches the selected one
+        selected = self._selected_project_worktree
+        for p in all_projects:
+            p['current'] = bool(p.get('worktree')) and p['worktree'] == selected
+
+        kwargs = dict(
+            sessions=sessions,
+            projects=projects,
+            current_session_id=self.client.session_id or "",
+            current_project_name=self._extract_project_name(current_project),
+            server_url=str(self.client.client.base_url) if self.client else "",
+            all_projects=all_projects,
+        )
+        if self.menubar:
+            self.menubar.update_menu(**kwargs)
+        if self.tray:
+            self.tray.update_menu(**kwargs)
+
+    def _read_opencode_db_sessions(self, project_worktree: str = "") -> list[dict]:
+        """Read sessions from SQLite DB, optionally filtered by project worktree.
+
+        Returns list of {id, title, directory, time}.
+        Falls back to API if DB unavailable.
+        """
+        import os as _os
+        import sqlite3
+
+        db_path = _os.path.expanduser("~/.local/share/opencode/opencode.db")
+        if not _os.path.isfile(db_path):
+            return []
+
+        try:
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            if project_worktree:
+                cur = conn.execute(
+                    "SELECT s.id, s.title, p.worktree, s.time_created "
+                    "FROM session s "
+                    "LEFT JOIN project p ON s.project_id = p.id "
+                    "WHERE p.worktree = ? AND s.title NOT LIKE '%[OCVoice]%' "
+                    "ORDER BY s.time_created DESC",
+                    (project_worktree,)
+                )
+            else:
+                cur = conn.execute(
+                    "SELECT s.id, s.title, p.worktree, s.time_created "
+                    "FROM session s "
+                    "LEFT JOIN project p ON s.project_id = p.id "
+                    "WHERE s.title NOT LIKE '%[OCVoice]%' "
+                    "ORDER BY s.time_created DESC"
+                )
+            result = []
+            for row in cur.fetchall():
+                sid, title, wt, t_created = row
+                result.append({
+                    "id": sid,
+                    "title": title or "untitled",
+                    "directory": wt or "",
+                    "time": {"updated": t_created or 0},
+                })
+            conn.close()
+            return result
+        except Exception:
+            return []
+
+    def _get_db_sessions_for_selected_project(self) -> list[dict]:
+        """Get sessions for the currently selected project. Falls back to API."""
+        wt = self._selected_project_worktree
+        if not wt:
+            return self.client.list_sessions() if self.client else []
+        result = self._read_opencode_db_sessions(wt)
+        if result:
+            return result
+        # Fallback: filter API sessions by directory
+        if self.client:
+            home = os.path.expanduser("~")
+            return [
+                s for s in self.client.list_sessions()
+                if s.get('directory', '').startswith(wt) or s.get('directory', '') == home
+            ]
+        return []
+
+    @staticmethod
+    def _extract_project_name(project: dict) -> str:
+        """Get a human-readable project name from API response."""
+        name = project.get('name', '') if project else ''
+        if name:
+            return name
+        worktree = project.get('worktree', '') if project else ''
+        if worktree and worktree != '/':
+            import os as _os
+            return _os.path.basename(worktree.rstrip('/'))
+        return project.get('id', 'Desktop')[:20] if project else 'Desktop'
+
+    def _read_opencode_db_projects(self) -> list[dict]:
+        """Read all projects from OpenCode Desktop storage.
+
+        Sources (combined):
+        1. opencode.global.dat — Electron config (all user-added projects)
+        2. opencode.db — SQLite DB (additional project info)
+
+        Returns list of {name, worktree, id, current}.
+        """
+        import os as _os
+
+        seen_worktrees = set()
+        result = []
+
+        # 1) opencode.global.dat — primary source for project list
+        global_dat_paths = [
+            _os.path.expanduser(
+                "~/Library/Application Support/ai.opencode.desktop/opencode.global.dat"
+            ),
+            _os.path.expanduser(
+                "~/.config/ai.opencode.desktop/opencode.global.dat"
+            ),
+        ]
+        for gd_path in global_dat_paths:
+            if _os.path.isfile(gd_path):
+                try:
+                    with open(gd_path) as f:
+                        gd_data = json.load(f)
+                    raw_server = gd_data.get('server', {})
+                    if isinstance(raw_server, str):
+                        raw_server = json.loads(raw_server)
+                    local = raw_server.get('projects', {}).get('local', [])
+                    for p in local:
+                        worktree = p.get('worktree', '')
+                        if worktree and worktree not in seen_worktrees:
+                            seen_worktrees.add(worktree)
+                            name = _os.path.basename(worktree.rstrip('/'))
+                            result.append({
+                                "name": name,
+                                "worktree": worktree,
+                                "id": "",
+                                "current": False,
+                            })
+                except Exception:
+                    pass
+                break
+
+        # 2) SQLite DB — supplement with IDs, names, VCS info
+        db_path = _os.path.expanduser("~/.local/share/opencode/opencode.db")
+        if _os.path.isfile(db_path):
+            try:
+                import sqlite3
+                conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+                cur = conn.execute(
+                    "SELECT id, worktree, name, vcs FROM project "
+                    "WHERE id != 'global' AND worktree != '/'"
+                )
+                db_projects = {}
+                for row in cur.fetchall():
+                    pid, worktree, pname, vcs = row
+                    db_projects[worktree] = (pid, pname, vcs)
+                conn.close()
+
+                for p in result:
+                    wt = p['worktree']
+                    if wt in db_projects:
+                        pid, pname, vcs = db_projects[wt]
+                        p['id'] = pid
+                        if pname:
+                            p['name'] = pname
+            except Exception:
+                pass
+
+        # 3) If global.dat unavailable, fallback to API
+        if not result:
+            return self._discover_projects_from_api()
+
+        return result
+
+    def _discover_projects_from_api(self) -> list[dict]:
+        """Fallback: get projects from current server's API."""
+        if not self.client:
+            return []
+        try:
+            result = []
+            for p in self.client.list_projects():
+                pid = p.get('id', '')
+                worktree = p.get('worktree', '')
+                if pid == 'global' or worktree == '/':
+                    continue
+                import os as _os
+                name = _os.path.basename(worktree.rstrip('/')) if worktree else pid[:40]
+                result.append({
+                    "name": name,
+                    "worktree": worktree,
+                    "id": pid,
+                    "current": False,
+                })
+            return result
+        except Exception:
+            return []
+
+    def _find_port_for_worktree(self, worktree: str) -> int | None:
+        """Scan known ports to find one serving this worktree. Returns port or None."""
+        import httpx
+        from .opencode.ide_discovery import IDEDiscovery
+
+        ide = IDEDiscovery()
+        scan_ports = sorted(set(
+            IDEDiscovery.KNOWN_PORTS + ide._scan_running_ports()
+        ))
+        pw = os.environ.get("OPENCODE_SERVER_PASSWORD", "")
+        auth = ("opencode", pw) if pw else None
+
+        for port in scan_ports:
+            try:
+                r = httpx.get(f"http://127.0.0.1:{port}/project", auth=auth, timeout=1.5)
+                if r.status_code != 200:
+                    continue
+                for p in r.json():
+                    if p.get('worktree') == worktree:
+                        return port
+            except Exception:
+                pass
+        return None
+
+    def _extract_port(self) -> int:
+        """Extract port number from current client URL."""
+        if not self.client:
+            return 0
+        try:
+            url = str(self.client.client.base_url)
+            return int(url.rsplit(':', 1)[-1])
+        except Exception:
+            return 0
+
+    def _check_session_changes(self):
+        """List sessions; if a non-current user session has newer updated, switch to it."""
+        if not self.client:
+            return
+        try:
+            sessions = self.client.list_sessions()
+            if not sessions:
+                return
+            user_sessions = [s for s in sessions
+                             if '[OCVoice]' not in s.get('title', '')
+                             and s.get('id') != self._state_session_id]
+            if not user_sessions:
+                return
+
+            latest = max(user_sessions, key=lambda s: s.get('time', {}).get('updated', 0))
+            current_id = self.client.session_id
+            latest_updated = latest.get('time', {}).get('updated', 0)
+
+            if time.time() < self._manual_session_until:
+                return
+
+            if latest['id'] != current_id:
+                current_updated = 0
+                for s in user_sessions:
+                    if s['id'] == current_id:
+                        current_updated = s.get('time', {}).get('updated', 0)
+                        break
+                if latest_updated > current_updated:
+                    title = latest.get('title', 'untitled')
+                    self._beep(660, 0.1)
+                    print(f"  📋 Переключение на сессию: {title} ({latest['id'][:16]}...)", flush=True)
+                    self.client.session_id = latest['id']
+        except Exception:
+            pass
+
+    def _send_message(self, text: str):
+        """Send a message to the active user session (sync, waits for response)."""
+        if not text:
+            return
+
+        print(f"\n{'─'*50}", flush=True)
+        print(f"  🤖 Отправляю в OpenCode [{self._current_agent}]...", flush=True)
+        self._notify("OCVoice 🎤", f"Отправляю: {text[:100]}")
+
+        if not self.client or not self.client.session_id:
+            print(f"[OCVoice] ❌ Нет сессии для отправки", flush=True)
+            return
+
+        try:
+            self._set_state("sending")
+            response = self.client.send_message(text=text)
+            response_text = self._extract_response_text(response)
+            if response_text:
+                print(f"  ✅ Ответ:", flush=True)
+                for line in response_text[:600].split('\n'):
+                    print(f"  │ {line}", flush=True)
+                self._show_response(response_text)
+                self._set_state("ready")
+            else:
+                print(f"  ⚠️ Пустой ответ от модели", flush=True)
+
+            if response_text and self.config.tts_enabled:
+                self._speak_response(response_text)
+        except Exception as e:
+            print(f"  ❌ Ошибка отправки: {e}", flush=True)
+        finally:
+            print(f"{'─'*50}\n", flush=True)
+
+    def _extract_response_text(self, response: dict) -> str:
+        """Extract readable text from OpenCode response."""
+        try:
+            parts = response.get("parts", [])
+            texts = []
+            for part in parts:
+                if part.get("type") == "text":
+                    texts.append(part.get("text", ""))
+            return "\n".join(texts)
+        except Exception:
+            return ""
+
+    def _speak_response(self, text: str):
+        """Convert text to speech and play it."""
+        try:
+            from .speech.tts import TextToSpeech
+            tts = TextToSpeech(
+                backend=self.config.tts_backend,
+                voice_ru=self.config.tts_voice_ru,
+                voice_en=self.config.tts_voice_en,
+                speed=self.config.tts_speed,
+            )
+            tts.speak(text)
+        except Exception as e:
+            print(f"[OCVoice] TTS error: {e}")
+
+    def _ensure_connected(self):
+        """Make sure OpenCode server is reachable. Start if auto_start is on."""
+        if self.client.is_connected():
+            return
+
+        if self.config.opencode_auto_start:
+            print("[OCVoice] OpenCode server not reachable, starting...")
+            if self.launcher:
+                self.launcher.start(timeout=30.0)
+
+        # Give it a moment
+        for _ in range(10):
+            if self.client.is_connected():
+                return
+            time.sleep(0.5)
+
+        print("[OCVoice] WARNING: Could not connect to OpenCode server")
+
+    def _reset_wake_state(self):
+        """Reset state."""
+        self._cmd_mode = False
+        self._cmd_text = ""
+        self._audio_buffer = []
+        self._verify_buffer = []
+        self._cmd_longest = ""
+        if self._vosk:
+            self._vosk.reset()
+        self._quiet_until = time.time() + 3.0
+        self._cmd_last_partial = ""
+        self._cmd_silence_since = time.time()
+        self._vad_cmd_buffer = np.array([], dtype=np.float32)
+
+    def _play_wake_sound(self):
+        """Play a short sound to indicate wake word detection."""
+        self._beep(800, 0.1)
+
+    def _play_stop_sound(self):
+        """Play a short sound to indicate listening stopped."""
+        self._beep(400, 0.15)
+
+    def _beep(self, frequency: float, duration: float):
+        """Generate a short beep — allowed always (one beep on wake word)."""
+        try:
+            import sounddevice as sd
+            sample_rate = 44100
+            t = np.linspace(0, duration, int(sample_rate * duration), False)
+            tone = 0.7 * np.sin(2 * np.pi * frequency * t)
+            # Apply fade in/out
+            fade = int(0.01 * sample_rate)
+            tone[:fade] *= np.linspace(0, 1, fade)
+            tone[-fade:] *= np.linspace(1, 0, fade)
+            sd.play(tone.astype(np.float32), sample_rate, blocking=False)
+        except Exception:
+            pass
+
+    def _signal_handler(self, signum, frame):
+        """Handle shutdown signals."""
+        print("\n[OCVoice] Shutting down...")
+        self._running = False
+
+    def shutdown(self):
+        """Clean shutdown of all components."""
+        self._running = False
+        # Reset state before stopping
+        self._state = "stopped"
+        self._state_since = time.time()
+
+        if self.client and self._state_session_id:
+            try:
+                self.client.update_session(title="🔴 [OCVoice] выключен", session_id=self._state_session_id)
+            except Exception:
+                pass
+
+        # Reset dock badge
+        try:
+            import subprocess
+            subprocess.run(["osascript", "-e",
+                'tell application "System Events" to set badge of (first process whose name is "OpenCode") to ""'],
+                capture_output=True, timeout=2)
+        except Exception:
+            pass
+
+        # Write final state file
+        try:
+            import json
+            from pathlib import Path
+            state_path = Path.home() / ".config" / "ocvoice" / "state.json"
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.write_text(json.dumps({
+                "state": "stopped",
+                "icon": "🔴",
+                "label": "выключен",
+                "listening": False,
+                "since": time.time(),
+                "model": self._current_model,
+                "agent": self._current_agent,
+            }, ensure_ascii=False))
+        except Exception:
+            pass
+
+        if self.overlay:
+            self.overlay.stop()
+        if self.menubar:
+            self.menubar.stop()
+        if self.tray:
+            self.tray.stop()
+        if self.capture:
+            self.capture.stop()
+        if self.client:
+            self.client.close()
+        if self.launcher:
+            self.launcher.stop()
+        print("[OCVoice] Daemon stopped.")
+
+    def _on_menubar_toggle(self, enabled: bool):
+        """Handle menu bar toggle callback."""
+        self._listening = enabled
+        if self.menubar:
+            self.menubar.update_status("listening" if enabled else "stopped")
+        if self.tray:
+            self.tray.update("listening" if enabled else "stopped")
+        print(f"[OCVoice] Listening {'enabled' if enabled else 'disabled'} via menu bar")
+
+    def _on_overlay_toggle(self):
+        if self.overlay:
+            self.overlay.toggle()
+
+    def _on_enroll(self):
+        print("[OCVoice] Starting voice enrollment via menu bar...")
+        from .speech.speaker import SpeakerVerifier
+        verifier = SpeakerVerifier(
+            threshold=self.config.speaker_threshold,
+            enrollments_dir=self.config.speaker_enrollments_dir,
+            sample_rate=self.config.audio_sample_rate,
+        )
+        verifier.enroll()
+
+    def _on_menubar_quit(self):
+        self._running = False
+
+    def _on_tray_toggle(self, enabled: bool):
+        """Handle tray toggle callback."""
+        self._listening = enabled
+        if self.tray:
+            self.tray.update("listening" if enabled else "stopped")
+        if self.menubar:
+            self.menubar.update_status("listening" if enabled else "stopped")
+        print(f"[OCVoice] Listening {'enabled' if enabled else 'disabled'} via tray")
+
+    def _on_tray_exit(self):
+        """Handle tray exit callback."""
+        self._running = False
+
+    def _on_tray_select_session(self, session_id: str):
+        """Handle session selection from tray menu."""
+        if not self.client:
+            return
+        self.client.session_id = session_id
+        self._manual_session_until = time.time() + 30
+        self._beep(880, 0.1)
+        title = "?"
+        try:
+            s = self.client.get_session(session_id)
+            title = s.get('title', '?')[:40]
+        except Exception:
+            pass
+        print(f"[OCVoice] 📋 Tray: переключено на сессию '{title}'", flush=True)
+
+    def _on_tray_find_server(self, target_port=None):
+        """Handle 'Find Server' from tray/menubar menu."""
+        self._selected_project_worktree = ""
+        if target_port:
+            print(f"[OCVoice] 🔄 Подключение к проекту на порту :{target_port}", flush=True)
+        self._recheck_ide_server(target_port=target_port)
+
+    def _on_tray_new_session(self):
+        """Handle 'New Session' from tray menu."""
+        if not self.client:
+            return
+        self._selected_project_worktree = ""
+        try:
+            s = self.client.create_session("🎤 Новая сессия")
+            self.client.session_id = s['id']
+            self._manual_session_until = time.time() + 30
+            self._beep(880, 0.1)
+            print(f"[OCVoice] ✚ Tray: создана новая сессия {s['id'][:16]}...", flush=True)
+        except Exception as e:
+            print(f"[OCVoice] ✚ Tray: ошибка создания сессии — {e}", flush=True)
+
+    def _on_tray_select_project(self, worktree: str):
+        """Handle project selection from tray/menubar menu."""
+        if not worktree:
+            return
+        name = worktree.rsplit('/', 1)[-1]
+        print(f"[OCVoice] 📁 Выбран проект: {name}", flush=True)
+        self._selected_project_worktree = worktree
+
+        # Pick the most recent session for this project from DB
+        sessions = self._read_opencode_db_sessions(worktree)
+        if sessions:
+            latest = max(sessions, key=lambda s: s.get('time', {}).get('updated', 0))
+            if self.client:
+                self.client.session_id = latest['id']
+                self._manual_session_until = time.time() + 30
+            print(f"  📋 Сессия: {latest.get('title', 'untitled')[:40]}", flush=True)
+
+        self._update_ui_menu()
+        self._beep(660, 0.1)
+
+    @staticmethod
+    def print_status():
+        """Print daemon status."""
+        print("OCVoice Status:")
+        pid_file = Path.home() / ".config" / "ocvoice" / "opencode.pid"
+        if pid_file.exists():
+            try:
+                pid = int(pid_file.read_text().strip())
+                print(f"  OpenCode PID: {pid}")
+            except ValueError:
+                print("  OpenCode PID: unknown")
+        else:
+            print("  OpenCode PID: not running")
+
+        enroll_dir = Path.home() / ".config" / "ocvoice" / "enrollments"
+        if enroll_dir.exists():
+            enrollments = list(enroll_dir.glob("*.npy"))
+            print(f"  Voice enrollments: {len(enrollments)}")
+            for e in enrollments:
+                print(f"    - {e.stem}")
+        else:
+            print("  Voice enrollments: none")
+
+    @staticmethod
+    def stop():
+        """Stop a running daemon."""
+        pid_file = Path.home() / ".config" / "ocvoice" / "opencode.pid"
+        if pid_file.exists():
+            try:
+                pid = int(pid_file.read_text().strip())
+                import signal
+                if sys.platform == "win32":
+                    os.kill(pid, signal.SIGTERM)
+                else:
+                    os.kill(pid, signal.SIGTERM)
+                print(f"[OCVoice] Sent stop signal to PID {pid}")
+                pid_file.unlink(missing_ok=True)
+            except (ProcessLookupError, ValueError):
+                print("[OCVoice] Daemon not running. PID file cleaned up.")
+                pid_file.unlink(missing_ok=True)
+        else:
+            print("[OCVoice] No daemon PID file found.")

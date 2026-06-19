@@ -1,0 +1,278 @@
+"""Intent parser — converts transcribed speech to structured commands.
+
+Two parsing strategies:
+1. Regex (fast, offline, rule-based) — default
+2. LLM (via OpenCode itself) — for complex/ambiguous phrases
+"""
+
+import re
+from typing import Optional
+
+from .intents import (
+    Intent,
+    INTENT_PATTERNS_RU,
+    INTENT_PATTERNS_EN,
+    MESSAGE_TRIGGERS_RU,
+    MESSAGE_TRIGGERS_EN,
+)
+
+
+class ParsedCommand:
+    """Result of intent parsing."""
+
+    def __init__(
+        self,
+        intent: Intent,
+        text: str = "",
+        arguments: dict = None,
+        confidence: float = 0.0,
+        raw_text: str = "",
+    ):
+        self.intent = intent
+        self.text = text  # Cleaned text / message content
+        self.arguments = arguments or {}
+        self.confidence = confidence
+        self.raw_text = raw_text
+
+    def __repr__(self):
+        return (f"ParsedCommand(intent={self.intent.value}, "
+                f"text='{self.text[:50]}', confidence={self.confidence:.2f})")
+
+
+class RegexIntentParser:
+    """Rule-based intent parser using regex patterns."""
+
+    def __init__(self, confidence_threshold: float = 0.7):
+        self.threshold = confidence_threshold
+
+        # Compile all patterns
+        self._patterns_ru = self._compile(INTENT_PATTERNS_RU)
+        self._patterns_en = self._compile(INTENT_PATTERNS_EN)
+
+    def _compile(self, patterns: list) -> list:
+        """Compile regex patterns."""
+        compiled = []
+        for intent, pats in patterns:
+            for pat in pats:
+                try:
+                    compiled.append((intent, re.compile(pat, re.IGNORECASE)))
+                except re.error:
+                    pass
+        return compiled
+
+    def parse(self, text: str) -> ParsedCommand:
+        """Parse text into a command.
+
+        Args:
+            text: Transcribed speech text (may be Russian or English).
+
+        Returns:
+            ParsedCommand with intent and extracted arguments.
+        """
+        text = text.strip().lower()
+        if not text:
+            return ParsedCommand(Intent.UNKNOWN, raw_text=text)
+
+        # Strip wake words from text
+        cleaned = self._strip_wake_words(text)
+
+        # 1. Check explicit command patterns
+        command = self._match_patterns(cleaned)
+        if command and command.confidence >= self.threshold:
+            return command
+
+        # 2. Check message trigger phrases
+        command = self._match_message_triggers(cleaned)
+        if command:
+            return command
+
+        # 3. Default: treat as SEND_MESSAGE
+        return ParsedCommand(
+            intent=Intent.SEND_MESSAGE,
+            text=cleaned,
+            raw_text=text,
+            confidence=0.5,
+        )
+
+    def _strip_wake_words(self, text: str) -> str:
+        """Remove known wake words from the text."""
+        wake_phrases = [
+            "окей код", "окей code", "okay code",
+            "hey code", "эй код", "хей код",
+            "окей", "okay",
+        ]
+        cleaned = text
+        for phrase in wake_phrases:
+            cleaned = cleaned.replace(phrase, "").strip()
+            cleaned = re.sub(r'\s+', ' ', cleaned)
+        return cleaned
+
+    def _match_patterns(self, text: str) -> Optional[ParsedCommand]:
+        """Try to match text against known command patterns."""
+        best_match = None
+        best_length = 0
+
+        # Try Russian patterns first, then English
+        for intent, pattern in self._patterns_ru + self._patterns_en:
+            match = pattern.search(text)
+            if match:
+                match_length = len(match.group(0))
+                if match_length > best_length:
+                    best_length = match_length
+                    args = self._extract_args(intent, match)
+                    best_match = ParsedCommand(
+                        intent=intent,
+                        text=args.pop("_text", ""),
+                        arguments=args,
+                        confidence=0.9,
+                        raw_text=text,
+                    )
+
+        return best_match
+
+    def _match_message_triggers(self, text: str) -> Optional[ParsedCommand]:
+        """Check if text starts with a message trigger phrase."""
+        all_triggers = MESSAGE_TRIGGERS_RU + MESSAGE_TRIGGERS_EN
+
+        # Sort by length (longest first) to match more specific triggers
+        for trigger in sorted(all_triggers, key=len, reverse=True):
+            if text.startswith(trigger + " ") or text.startswith(trigger + ":"):
+                message = text[len(trigger):].strip().lstrip(": ")
+                if message:
+                    return ParsedCommand(
+                        intent=Intent.SEND_MESSAGE,
+                        text=message,
+                        raw_text=text,
+                        confidence=0.85,
+                    )
+
+        # Also check if trigger word is in the middle
+        for trigger in all_triggers:
+            idx = text.find(" " + trigger + " ")
+            if idx > 0:
+                message = text[idx + len(trigger) + 1:].strip()
+                if message:
+                    return ParsedCommand(
+                        intent=Intent.SEND_MESSAGE,
+                        text=message,
+                        raw_text=text,
+                        confidence=0.7,
+                    )
+
+        return None
+
+    def _extract_args(self, intent: Intent, match: re.Match) -> dict:
+        """Extract named arguments from regex match."""
+        args = match.groupdict().copy()
+
+        # Try to get captured groups
+        groups = match.groups()
+        group_map = IntentParser.ARGUMENT_NAMES.get(intent, [])
+
+        for i, group in enumerate(groups):
+            if group:
+                if i < len(group_map):
+                    args[group_map[i]] = group.strip()
+                else:
+                    args["_text"] = group.strip()
+
+        # For SEND_MESSAGE-like intents, extract the text
+        if intent in (Intent.SWITCH_PROJECT, Intent.SWITCH_MODEL,
+                       Intent.SWITCH_AGENT, Intent.SWITCH_SESSION,
+                       Intent.EXECUTE_COMMAND, Intent.RUN_SHELL):
+            for i, group in enumerate(groups):
+                if group and i == 0:
+                    args["_text"] = group.strip()
+
+        return args
+
+
+class IntentParser:
+    """Main intent parser with configurable strategy."""
+
+    # Maps intents to expected argument names
+    ARGUMENT_NAMES = {
+        Intent.SWITCH_PROJECT: ["project"],
+        Intent.SWITCH_MODEL: ["model"],
+        Intent.SWITCH_AGENT: ["agent"],
+        Intent.SWITCH_SESSION: ["session"],
+        Intent.EXECUTE_COMMAND: ["command"],
+        Intent.RUN_SHELL: ["command"],
+    }
+
+    KNOWN_MODELS = {
+        # Russian aliases
+        "клод": "anthropic/claude-sonnet-4-5",
+        "клод сонет": "anthropic/claude-sonnet-4-5",
+        "клод опус": "anthropic/claude-opus-4-5",
+        "клод хайку": "anthropic/claude-haiku-4-5",
+        "джипити": "openai/gpt-5",
+        "chatgpt": "openai/gpt-5",
+        "гпт": "openai/gpt-5",
+        "гемини": "google/gemini-2.5-pro",
+        "джемини": "google/gemini-2.5-pro",
+        # English aliases
+        "claude": "anthropic/claude-sonnet-4-5",
+        "sonnet": "anthropic/claude-sonnet-4-5",
+        "claude sonnet": "anthropic/claude-sonnet-4-5",
+        "opus": "anthropic/claude-opus-4-5",
+        "claude opus": "anthropic/claude-opus-4-5",
+        "haiku": "anthropic/claude-haiku-4-5",
+        "claude haiku": "anthropic/claude-haiku-4-5",
+        "gpt": "openai/gpt-5",
+        "gpt5": "openai/gpt-5",
+        "openai": "openai/gpt-5",
+        "gemini": "google/gemini-2.5-pro",
+        "deepseek": "deepseek/deepseek-chat",
+    }
+
+    def __init__(self, parser_type: str = "regex", confidence_threshold: float = 0.7):
+        self.parser_type = parser_type
+        self.regex_parser = RegexIntentParser(confidence_threshold)
+
+    def parse(self, text: str) -> ParsedCommand:
+        """Parse transcribed text into a command."""
+        if self.parser_type == "regex":
+            command = self.regex_parser.parse(text)
+            command = self._normalize(command)
+            return command
+        else:
+            # LLM-based parsing — delegates to OpenCode itself
+            return ParsedCommand(
+                intent=Intent.SEND_MESSAGE,
+                text=text,
+                raw_text=text,
+                confidence=0.6,
+            )
+
+    def _normalize(self, command: ParsedCommand) -> ParsedCommand:
+        """Normalize and enhance parsed command.
+
+        - Resolve model aliases to full model IDs
+        - Normalize mode names
+        """
+        if command.intent == Intent.SWITCH_MODEL:
+            name = command.text.lower().strip()
+            if name in self.KNOWN_MODELS:
+                command.arguments["model"] = self.KNOWN_MODELS[name]
+            else:
+                command.arguments["model"] = command.text.strip()
+
+        elif command.intent == Intent.SWITCH_MODE:
+            mode = command.text.lower().strip()
+            if mode in ("план", "plan"):
+                command.arguments["agent"] = "plan"
+            elif mode in ("билд", "build", "код"):
+                command.arguments["agent"] = "build"
+            else:
+                command.arguments["agent"] = mode
+
+        elif command.intent == Intent.TOGGLE_THINKING:
+            # Determine enable/disable from raw text
+            raw = command.raw_text.lower()
+            if any(w in raw for w in ("отключи", "скрой", "disable", "hide", "выключи")):
+                command.arguments["enable"] = False
+            else:
+                command.arguments["enable"] = True
+
+        return command

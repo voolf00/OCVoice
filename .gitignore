@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Model files (large)
+models/
+*.onnx
+*.bin
+*.pt
+*.pth
+
+# Cache
+.cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config overrides (keep template, ignore user)
+*.local.toml
+
+# PID files
+*.pid
+
+# Logs
+*.log
