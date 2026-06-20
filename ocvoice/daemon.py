@@ -1718,10 +1718,28 @@ class VoiceDaemon:
                         current_updated = s.get('time', {}).get('updated', 0)
                         break
                 if latest_updated > current_updated:
-                    title = latest.get('title', 'untitled')
-                    self._beep(660, 0.1)
-                    print(f"  📋 Переключение на сессию: {title} ({latest['id'][:16]}...)", flush=True)
-                    self.client.session_id = latest['id']
+                    # Only auto-switch if no project is selected, or session belongs to selected project
+                    selected = self._selected_project_worktree
+                    if not selected:
+                        # No project selected — switch freely
+                        pass
+                    else:
+                        # Project selected — only switch if newer session is in the same project
+                        # Check directory field: starts with selected worktree
+                        latest_dir = latest.get('directory', '')
+                        current_dir = ''
+                        for s in user_sessions:
+                            if s['id'] == current_id:
+                                current_dir = s.get('directory', '')
+                                break
+                        if not (latest_dir.startswith(selected) or latest_dir == os.path.expanduser("~")):
+                            # Newer session is NOT in the selected project — don't switch
+                            latest_updated = 0  # Prevent switch
+                    if latest_updated > current_updated:
+                        title = latest.get('title', 'untitled')
+                        self._beep(660, 0.1)
+                        print(f"  📋 Переключение на сессию: {title} ({latest['id'][:16]}...)", flush=True)
+                        self.client.session_id = latest['id']
         except Exception:
             pass
 
@@ -1997,6 +2015,7 @@ class VoiceDaemon:
         name = worktree.rsplit('/', 1)[-1]
         print(f"[OCVoice] 📁 Выбран проект: {name}", flush=True)
         self._selected_project_worktree = worktree
+        self._manual_session_until = time.time() + 30
 
         # Pick the most recent session for this project from DB
         sessions = self._read_opencode_db_sessions(worktree)
@@ -2005,7 +2024,6 @@ class VoiceDaemon:
             if self.client:
                 session_id = latest['id']
                 self.client.session_id = session_id
-                self._manual_session_until = time.time() + 30
                 print(f"  📋 Сессия: {latest.get('title', 'untitled')[:40]} ({session_id[:20]}...)", flush=True)
         else:
             print(f"  ⚠️ Нет сессий для проекта {name}", flush=True)
