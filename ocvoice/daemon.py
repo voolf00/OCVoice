@@ -471,8 +471,8 @@ class VoiceDaemon:
                     continue
 
                 # Safety: сброс зависших состояний (проверка каждый чанк)
-                if self._state == "cmd" and time.time() - self._state_since > 30:
-                    print(f"[OCVoice] ⏰ State safety: cmd timeout — возврат в ожидание", flush=True)
+                if self._state == "cmd" and time.time() - self._state_since > 180:
+                    print(f"[OCVoice] ⏰ Safety reset: cmd 180s timeout", flush=True)
                     self._cmd_mode = False
                     if self._vosk:
                         self._vosk.reset()
@@ -606,9 +606,9 @@ class VoiceDaemon:
             return
 
         # ── CMD: используем partial (вся речь целиком) + finals ──
-        # Safety: если Vosk молчит >12с (пользователь перестал говорить) — сброс
-        if time.time() - getattr(self, '_cmd_silence_since', time.time()) > 12:
-            print(f"[OCVoice] ⏰ CMD timeout — речь не обнаружена 12с", flush=True)
+        # Safety: если Vosk молчит >15с — возможно пользователь ушёл
+        if time.time() - getattr(self, '_cmd_silence_since', time.time()) > 120:
+            print(f"[OCVoice] ⏰ CMD timeout — 120с без речи", flush=True)
             self._cmd_mode = False
             self._cmd_text = ""
             if self._vosk:
