@@ -174,36 +174,30 @@ class TextToSpeech:
         voice_ru: str = "ru-RU-SvetlanaNeural",
         voice_en: str = "en-US-JennyNeural",
         speed: float = 1.0,
+        read_code: bool = False,
+        max_length: int = 500,
     ):
         self.backend = backend
         self.voice_ru = voice_ru
         self.voice_en = voice_en
         self.speed = speed
+        self.read_code = read_code
+        self.max_length = max_length
 
     def speak(self, text: str, language: str = "auto"):
-        """Convert text to speech and play it.
-
-        Args:
-            text: Text to speak.
-            language: "ru", "en", or "auto" for auto-detection.
-        """
+        """Convert text to speech and play it."""
         if not text or not text.strip():
             return
 
-        # Strip markdown formatting — TTS shouldn't read "**" as "zvezdochka"
-        import re
-        text = re.sub(r'\*{1,3}([^*]+)\*{1,3}', r'\1', text)  # **bold**, *italic*
-        text = re.sub(r'`([^`]+)`', r'\1', text)                # `code`
-        text = re.sub(r'~~([^~]+)~~', r'\1', text)              # ~~strike~~
-        text = re.sub(r'#{1,6}\s*', '', text)                   # ## headers
-        text = re.sub(r'[-*_]{3,}', '', text)                   # --- dividers
-        text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)    # [text](url)
-        text = re.sub(r'\s+', ' ', text).strip()
+        # Clean text for speech
+        text = self._clean_text(text)
 
         # Truncate very long responses
-        max_chars = 500
-        if len(text) > max_chars:
-            text = text[:max_chars] + "..."
+        if len(text) > self.max_length:
+            text = text[:self.max_length].rsplit('. ', 1)[0] + "."
+
+        if not text.strip():
+            return
 
         # Detect language
         if language == "auto":
@@ -233,6 +227,65 @@ class TextToSpeech:
         if russian_chars > len(text) * 0.3:
             return "ru"
         return "en"
+
+    def _clean_text(self, text: str) -> str:
+        """Prepare text for speech: strip code, formatting, symbols."""
+        import re
+
+        # 1. Remove code blocks (```...```)
+        if not self.read_code:
+            text = re.sub(r'```[\s\S]*?```', '', text)
+            text = re.sub(r'~~~[\s\S]*?~~~', '', text)
+
+        # 2. Remove inline `code` (replace with its content)
+        text = re.sub(r'`([^`]+)`', r'\1', text)
+
+        # 3. Remove markdown links: [text](url) → text
+        text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+
+        # 4. Remove images: ![alt](url)
+        text = re.sub(r'!\[([^\]]*)\]\([^)]+\)', '', text)
+
+        # 5. Remove bold/italic: **text**, *text*, ~~text~~
+        text = re.sub(r'\*{1,3}([^*]+)\*{1,3}', r'\1', text)
+        text = re.sub(r'~~([^~]+)~~', r'\1', text)
+
+        # 6. Remove markdown headers
+        text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
+
+        # 7. Remove horizontal rules
+        text = re.sub(r'^[-*_]{3,}\s*$', '', text, flags=re.MULTILINE)
+
+        # 8. Remove diff markers (+ , -) at line starts
+        text = re.sub(r'^[+\-]\s', '', text, flags=re.MULTILINE)
+
+        # 9. Remove shell prompt markers
+        text = re.sub(r'^\$\s', '', text, flags=re.MULTILINE)
+        text = re.sub(r'^>\s', '', text, flags=re.MULTILINE)
+
+        # 10. Remove ASCII arrows and special chars that TTS mangles
+        text = re.sub(r'\s*→\s*', ' ', text)
+        text = re.sub(r'\s*=>\s*', ' ', text)
+        text = re.sub(r'\s*==>\s*', ' ', text)
+        text = re.sub(r'\s*\|-\s*', '', text)
+
+        # 11. Remove bullet points (-, *, + at line starts)
+        text = re.sub(r'^[\s]*[-*+]\s+', '', text, flags=re.MULTILINE)
+
+        # 12. Remove numbered list markers (1. 2. etc)
+        text = re.sub(r'^\s*\d+[.)]\s+', '', text, flags=re.MULTILINE)
+
+        # 13. Collapse multiple newlines
+        text = re.sub(r'\n{3,}', '\n\n', text)
+
+        # 14. Collapse multiple spaces
+        text = re.sub(r'[ \t]+', ' ', text)
+
+        # 15. Remove lines that are just symbols after cleaning
+        lines = [l for l in text.split('\n') if l.strip()]
+        text = '\n'.join(lines)
+
+        return text.strip()
 
     def _play_audio(self, audio: bytes):
         """Play WAV audio bytes."""

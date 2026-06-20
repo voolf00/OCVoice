@@ -270,6 +270,28 @@ class SettingsWindow:
         )
         self.tts_switch.pack(anchor="w", pady=(4, 10))
 
+        # TTS: read code toggle
+        self.tts_code_var = ctk.BooleanVar(value=False)
+        self.tts_code_switch = ctk.CTkSwitch(
+            scroll, text="Read code blocks (```...```)",
+            variable=self.tts_code_var,
+            font=ctk.CTkFont(size=13),
+        )
+        self.tts_code_switch.pack(anchor="w", pady=(2, 10))
+
+        # TTS: max length
+        ctk.CTkLabel(scroll, text="Max characters to read aloud",
+                      anchor="w", font=ctk.CTkFont(size=12)).pack(fill="x", pady=(0, 2))
+        len_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        len_frame.pack(fill="x", pady=(0, 10))
+        self.tts_len_slider = ctk.CTkSlider(
+            len_frame, from_=100, to=2000, number_of_steps=19,
+            command=lambda v: self.tts_len_label.configure(text=f"{int(v)}"),
+        )
+        self.tts_len_slider.pack(side="left", fill="x", expand=True)
+        self.tts_len_label = ctk.CTkLabel(len_frame, text="500", width=40)
+        self.tts_len_label.pack(side="right", padx=(10, 0))
+
         # Buttons
         btn_frame = ctk.CTkFrame(self.win, fg_color="transparent")
         btn_frame.pack(fill="x", padx=10, pady=(0, 10))
@@ -346,6 +368,13 @@ class SettingsWindow:
         tts = self.cfg.get("speech", {}).get("tts", {}).get("enabled", True)
         self.tts_var.set(tts)
 
+        tts_read = self.cfg.get("speech", {}).get("tts", {}).get("read_code", False)
+        self.tts_code_var.set(tts_read)
+
+        tts_max = self.cfg.get("speech", {}).get("tts", {}).get("max_length", 500)
+        self.tts_len_slider.set(tts_max)
+        self.tts_len_label.configure(text=str(tts_max))
+
     def _save(self):
         voice = self.cfg.setdefault("voice", {})
         voice["wake_words"] = [w.strip() for w in self.wake_entry.get().split(",") if w.strip()]
@@ -368,6 +397,8 @@ class SettingsWindow:
         sp["threshold"] = round(self.thresh_slider.get(), 1)
         tt = speech.setdefault("tts", {})
         tt["enabled"] = self.tts_var.get()
+        tt["read_code"] = self.tts_code_var.get()
+        tt["max_length"] = int(self.tts_len_slider.get())
 
         _save_config(self.cfg)
         _send_reload_ipc()

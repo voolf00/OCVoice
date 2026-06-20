@@ -1774,6 +1774,8 @@ class VoiceDaemon:
                 voice_ru=self.config.tts_voice_ru,
                 voice_en=self.config.tts_voice_en,
                 speed=self.config.tts_speed,
+                read_code=self.config.tts_read_code,
+                max_length=self.config.tts_max_length,
             )
             tts.speak(text)
         except Exception as e:

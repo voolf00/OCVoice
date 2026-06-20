@@ -290,6 +290,12 @@ class Config:
     def tts_speed(self) -> float: return self.get("speech", "tts", "speed", default=1.0)
 
     @property
+    def tts_read_code(self) -> bool: return self.get("speech", "tts", "read_code", default=False)
+
+    @property
+    def tts_max_length(self) -> int: return self.get("speech", "tts", "max_length", default=500)
+
+    @property
     def opencode_host(self) -> str: return self.get("opencode", "host", default="127.0.0.1")
 
     @property
