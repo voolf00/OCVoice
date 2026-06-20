@@ -1,9 +1,8 @@
 @echo off
 chcp 65001 >nul
-title OCVoice Installer for Windows
+title OpenCode Voice Installer for Windows
 echo =========================================
-echo   OCVoice — Voice Control for OpenCode
-echo   Windows Installer
+echo   OpenCode Voice — Windows Installer
 echo =========================================
 echo.
 
@@ -55,7 +54,6 @@ if not exist "%VENV_DIR%" (
 :: Install package
 echo [*] Installing dependencies...
 "%VENV_DIR%\Scripts\pip.exe" install --upgrade pip -q
-"%VENV_DIR%\Scripts\pip.exe" install vosk faster-whisper resemblyzer sounddevice webrtcvad edge-tts -q
 "%VENV_DIR%\Scripts\pip.exe" install -e "%~dp0." -q
 
 if errorlevel 1 (
@@ -158,12 +156,17 @@ echo   Installation complete!
 echo =========================================
 echo.
 echo Quick start:
-echo   ocv enroll     Enroll your voice (say the text aloud)
-echo   ocv start      Start voice daemon
+echo   ocv enroll           Record your voice
+echo   ocv start            Start voice daemon
+echo   ocv select project   Pick a project
+echo   ocv select session   Pick a session
+echo   Settings via ⚙️ in menu bar
 echo.
 echo Voice commands:
-echo   "okey kod, send message, otprav"
-echo   "okey kod, new session"
-echo   "okey kod, stop"
+echo   "окей код, напиши функцию, отправь"
+echo   "окей код, открой проект [name]"
+echo   "окей код, переключись на сессию [title]"
+echo   "окей код, последняя сессия"
+echo   "okey kod, send, otprav"
 echo.
 pause

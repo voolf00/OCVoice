@@ -8,7 +8,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 echo -e "${GREEN}=========================================${NC}"
-echo -e "${GREEN}   OCVoice — Voice Control for OpenCode${NC}"
+echo -e "${GREEN}   OpenCode Voice — Installer${NC}"
 echo -e "${GREEN}=========================================${NC}"
 echo ""
 
@@ -139,18 +139,19 @@ echo -e "${GREEN}   Installation complete!${NC}"
 echo -e "${GREEN}=========================================${NC}"
 echo ""
 echo "Quick start:"
-echo "  ocv start           # Start voice daemon (menu bar + overlay)"
-echo "  ocv status          # Check status"
-echo "  ocv stop            # Stop everything"
-echo ""
-echo "What you get:"
-echo "  🎤  Menu bar icon   — start/stop/status"
-echo "  📊  Floating overlay — see recognized speech"
-echo "  💬  IDE integration — messages in your session"
+echo "  ocv start           # Start voice daemon (menu bar icon appears)"
+echo "  ocv status          # Check current status"
+echo "  ocv stop            # Stop daemon"
+echo "  ocv enroll          # Record your voice print"
+echo "  ocv select project  # Pick a project interactively"
+echo "  ocv select session  # Pick a session interactively"
+echo "  ⚙️ Settings         # Click 🎤 → Settings in menu bar"
 echo ""
 echo "Voice commands:"
-echo '  "окей код, привет как дела, отправь"'
-echo '  "окей код, plan mode"'
-echo '  "окей код, новая сессия"'
+echo '  "окей код, напиши функцию, отправь"'
+echo '  "окей код, открой проект [name]"'
+echo '  "окей код, переключись на сессию [title]"'
+echo '  "окей код, последняя сессия"'
+echo '  "окей код, plan mode" / "build mode"'
 echo '  "окей код, стоп"'
 echo ""
