@@ -492,22 +492,25 @@ class SettingsWindow:
 
     def _start_enroll(self):
         """Start voice enrollment inline with progress."""
-        self.enroll_btn.configure(state="disabled", text="🎤 Recording...")
+        self.enroll_btn.configure(state="disabled", text="⏳ Initializing...")
         self.enroll_progress.pack(anchor="w", pady=(2, 2), fill="x")
         self.enroll_progress.set(0)
         self.enroll_status.pack(anchor="w")
         self.enroll_instruction.pack(anchor="w", pady=(2, 0))
-        self.enroll_instruction.configure(text='Прочитайте вслух:\n"Привет, это мой голос для управления OpenCode."')
-        self._enroll_start_time = time.time()
-        self._enroll_done = False
+        self.enroll_instruction.configure(text='Приготовьтесь читать вслух...')
+        self._enroll_phase = 0
+        self._enroll_ok = False
 
         def _record():
             import sounddevice as sd
             import numpy as np
             sr = 16000
             duration = 8
+            self._enroll_phase = 1
+            self._enroll_rec_start = time.time()
             audio = sd.rec(int(duration * sr), samplerate=sr, channels=1, dtype=np.float32, blocking=True)
             audio = audio.flatten()
+            self._enroll_phase = 2
             if len(audio) > 0:
                 from .speech.speaker import SpeakerVerifier
                 from .config import Config
@@ -515,31 +518,42 @@ class SettingsWindow:
                 verifier = SpeakerVerifier(cfg)
                 result = verifier.enroll_from_audio(audio, sr)
                 self._enroll_ok = True if result else False
-            self._enroll_done = True
+            self._enroll_phase = 3
 
-        self._enroll_ok = False
         import threading
         threading.Thread(target=_record, daemon=True).start()
         self._poll_enroll()
 
     def _poll_enroll(self):
         """Poll enrollment progress and update UI."""
-        if not self._enroll_done:
-            elapsed = time.time() - self._enroll_start_time
+        phase = self._enroll_phase
+        if phase == 0:
+            self.enroll_status.configure(text="⏳ Загрузка модели...")
+            self.enroll_progress.set(0.05)
+            self.win.after(200, self._poll_enroll)
+        elif phase == 1:
+            elapsed = time.time() - self._enroll_rec_start
             pct = min(elapsed / 8.0, 0.95)
             self.enroll_progress.set(pct)
             remaining = max(0, 8 - int(elapsed))
-            self.enroll_status.configure(text=f"🎤 Запись... {remaining}с")
+            self.enroll_status.configure(text=f"🎤 Recording... {remaining}s")
+            self.enroll_instruction.configure(text='Читайте вслух своим обычным голосом')
             self.win.after(200, self._poll_enroll)
-        else:
+        elif phase == 2:
+            self.enroll_status.configure(text="⏳ Processing voice print...")
+            self.enroll_progress.set(0.97)
+            self.win.after(200, self._poll_enroll)
+        elif phase == 3:
             self.enroll_progress.set(1.0)
+            self.enroll_progress.pack_forget()
             if self._enroll_ok:
-                self.enroll_status.configure(text="✅ Голос сохранён!")
+                self.enroll_status.configure(text="✅ Voice enrolled!")
                 self.enroll_instruction.configure(text="")
                 self.enroll_btn.configure(state="normal", text="🎙 Enroll Again")
             else:
-                self.enroll_status.configure(text="❌ Ошибка записи")
-                self.enroll_instruction.configure(text="Проверьте микрофон и попробуйте снова")
+                self.enroll_status.configure(text="❌ Recording failed")
+                self.enroll_instruction.configure(text="Check microphone and try again")
+                self.enroll_btn.configure(state="normal", text="🎙 Try Again")
                 self.enroll_btn.configure(state="normal", text="🎙 Try Again")
 
     def _cancel(self):
