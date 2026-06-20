@@ -15,9 +15,9 @@
 
 ### Features
 
-- 🎤 Voice control — switch projects, sessions, agents, models by voice
+- 🎤 Voice control — switch projects, sessions, agents by voice
 - 🧠 Speech recognition: **Vosk** (real-time, offline) + **faster-whisper** (high accuracy, fallback)
-- 🔒 **Speaker verification** (Resemblyzer / SpeechBrain) — only your voice gets through; low threshold (score ≥ 0.25) for reliable detection
+- 🔒 **Speaker verification** (Resemblyzer) — only your voice gets through; low threshold (score ≥ 0.25)
 - 🏃 **Streaming** — words appear as you speak, no 3-second windows
 - 📁 **Project-aware** — select projects from your OpenCode Desktop; sessions filter automatically
 - 🔍 **Fuzzy matching** — say project names in any language ("дипстрим" → DeepStream3, "mayak" → Maiak)
@@ -56,9 +56,21 @@ Speak: **"дарвин, напиши функцию сортировки, отп
 | "дарвин, план мод" / "билд мод" | Switch agent (Plan/Build) |
 | "дарвин, открой проект [name]" | Switch project (fuzzy match) |
 | "дарвин, последняя сессия" | Back to most recent session |
-| "окей код, последняя сессия" | Back to most recent session |
-| "окей код, найди сервер" / "find server" | Rediscover IDE server |
-| "окей код, список проектов" | List all projects |
+| "дарвин, найди сервер" | Rediscover IDE server |
+| "дарвин, список проектов" | List all projects |
+
+### CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `ocv start` | Start the daemon (menubar/tray icon appears) |
+| `ocv stop` | Stop the daemon |
+| `ocv status` | Show daemon PID and enrollment status |
+| `ocv enroll` | Record voice print (10 seconds) |
+| `ocv ptt` | Push-to-talk: one command, no wake word needed |
+| `ocv test-wake` | Test if "дарвин" is detected by Vosk |
+| `ocv select session` | Pick a session interactively |
+| `ocv select project` | Pick a project interactively |
 
 ### Project & Session Selection
 
@@ -71,8 +83,7 @@ Speak: **"дарвин, напиши функцию сортировки, отп
   → translit "дипстрим" → "dipstrim" → DeepStream3
 
 "дарвин, последняя сессия"
-  → releases manual lock
-  → poller picks most recently updated session
+  → releases manual lock, poller picks most recently updated session
 
 "дарвин, переключись на сессию тест"
   → fuzzy match against session titles
@@ -88,14 +99,14 @@ Speak: **"дарвин, напиши функцию сортировки, отп
 ### Architecture
 
 ```
-Microphone → Vosk (streaming) → "okay... code... test..."
+Microphone → Vosk (streaming) → "дарвин... напиши функцию..."
                     ↓
-          wake word "окей код" found?
+          wake word "дарвин" found?
                     ↓
            ⬇️ YES          ⬇️ NO
       Speaker Verify    keep listening
            ⬇️
-     score > threshold? (your voice?)
+     score ≥ 0.25? (your voice?)
    ⬇️ YES           ⬇️ NO
 BEEP + CMD MODE    → ignore
    ⬇️
@@ -110,7 +121,7 @@ Session title updates automatically. Icon in menubar/tray changes:
 
 | Icon | State | Description |
 |------|-------|-------------|
-| 🟢 | waiting / ожидает | Waiting for "окей код" |
+| 🟢 | waiting / ожидает | Waiting for "дарвин" |
 | 🔵 | command / команда | Listening, building text |
 | 🟣 | awaiting / ответ... | Sent, waiting for AI |
 | 🔴 | stopped / выкл | Listening paused |
@@ -119,7 +130,7 @@ Also in `~/.config/ocvoice/state.json`.
 
 ### Configuration
 
-**GUI:** ⚙️ Settings in menubar/tray → CustomTkinter window
+**GUI:** ⚙️ Settings in menubar/tray → CustomTkinter window (wake words, send phrases, language, sensitivity, TTS voice, device)
 **File:** `~/.config/ocvoice/config.toml`
 
 ```toml
@@ -128,7 +139,7 @@ device_id = 1
 
 [voice]
 language = "ru"
-wake_words = ["окей код", "hey code"]
+wake_words = ["дарвин", "darwin"]
 send_phrases = ["отправь", "отправляй", "отправить", "send", "go", "done"]
 wake_sensitivity = 0.5
 mode = "wake_word"
@@ -142,9 +153,12 @@ backend = "auto"
 local_model = "base"
 
 [speech.tts]
+enabled = true
 backend = "edge"
 voice_ru = "ru-RU-SvetlanaNeural"
 voice_en = "en-US-JennyNeural"
+read_code = false
+max_length = 500
 ```
 
 ---
@@ -153,9 +167,9 @@ voice_en = "en-US-JennyNeural"
 
 ### Возможности
 
-- 🎤 Голосовое управление — переключение проектов, сессий, агентов, моделей голосом
+- 🎤 Голосовое управление — переключение проектов, сессий, агентов голосом
 - 🧠 Распознавание: **Vosk** (стриминг, реальное время) + **faster-whisper** (точность, фолбек)
-- 🔒 **Верификация голоса** (Resemblyzer / SpeechBrain) — только ваш голос; низкий порог (score ≥ 0.25)
+- 🔒 **Верификация голоса** (Resemblyzer) — только ваш голос; низкий порог (score ≥ 0.25)
 - 🏃 **Стриминг** — слова по мере говорения, без окон по 3 секунды
 - 📁 **Проекты** — выбор проекта из OpenCode Desktop; сессии фильтруются автоматически
 - 🔍 **Fuzzy поиск** — называй проекты на любом языке ("дипстрим" → DeepStream3, "mayak" → Maiak)
@@ -194,40 +208,57 @@ ocv start       # запустить демон
 | "дарвин, план мод" / "билд мод" | Переключить агента |
 | "дарвин, открой проект [название]" | Выбрать проект (fuzzy match) |
 | "дарвин, последняя сессия" | Вернуться к последней сессии |
+| "дарвин, найди сервер" | Пересканировать серверы |
+| "дарвин, список проектов" | Показать все проекты |
+
+### CLI Команды
+
+| Команда | Описание |
+|---------|----------|
+| `ocv start` | Запустить демон |
+| `ocv stop` | Остановить демон |
+| `ocv status` | Статус демона |
+| `ocv enroll` | Записать отпечаток голоса |
+| `ocv ptt` | Push-to-talk (без wake word) |
+| `ocv test-wake` | Проверить детекцию "дарвин" |
+| `ocv select session` | Выбрать сессию |
+| `ocv select project` | Выбрать проект |
 
 ### Выбор проектов и сессий
 
 ```
-"окей код, открой проект маяк"
+"дарвин, открой проект маяк"
   → fuzzy match "маяк" → "mayak" → Maiak
   → авто-выбор последней сессии для Maiak
 
-"окей код, дипстрим, отправь"
+"дарвин, дипстрим, отправь"
   → транслит "дипстрим" → "dipstrim" → DeepStream3
 
-"окей код, последняя сессия"
-  → снимает блокировку
-  → поллер выбирает самую свежую сессию
+"дарвин, последняя сессия"
+  → снимает блокировку, поллер выбирает самую свежую сессию
 
-"окей код, переключись на сессию тест"
+"дарвин, переключись на сессию тест"
   → fuzzy match по названиям сессий
+
+"дарвин, план мод, отправь"
+  → переключает на Plan агента
 ```
 
-**Через меню-бар/трей:** Иконка 🎤 → 📁 Проекты / 💬 Сессии
+**Через меню-бар/трей:** Иконка 🎤 → 📁 Проекты / 💬 Сессии / 🤖 Агент
 **Через CLI:** `ocv select project` / `ocv select session`
 **Через настройки:** ⚙️ Settings в меню-баре/трее → окно CustomTkinter
 
 ### Архитектура
 
 ```
-Микрофон → Vosk (стриминг) → "окей... код... тест..."
+Микрофон → Vosk (стриминг) → "дарвин... напиши функцию..."
                     ↓
-          wake word "окей код" найден?
+          wake word "дарвин" найден?
                     ↓
            ⬇️ ДА           ⬇️ НЕТ
       Speaker Verify     ждём дальше
            ⬇️
-      score > threshold?
+     score ≥ 0.25?
    ⬇️ ДА           ⬇️ НЕТ
 BEEP + CMD MODE  → игнор
    ⬇️
@@ -242,7 +273,7 @@ BEEP + CMD MODE  → игнор
 
 | Иконка | Состояние | Описание |
 |--------|-----------|----------|
-| 🟢 | ожидает | Ждёт "окей код" |
+| 🟢 | ожидает | Ждёт "дарвин" |
 | 🔵 | команда | Слушает, набирает текст |
 | 🟣 | ответ... | Отправлено, ждёт AI |
 | 🔴 | выкл | Прослушивание остановлено |
@@ -258,7 +289,7 @@ device_id = 1
 
 [voice]
 language = "ru"
-wake_words = ["окей код", "hey code"]
+wake_words = ["дарвин", "darwin"]
 send_phrases = ["отправь", "отправляй", "отправить", "send", "go", "done"]
 wake_sensitivity = 0.5
 mode = "wake_word"
@@ -272,9 +303,12 @@ backend = "auto"
 local_model = "base"
 
 [speech.tts]
+enabled = true
 backend = "edge"
 voice_ru = "ru-RU-SvetlanaNeural"
 voice_en = "en-US-JennyNeural"
+read_code = false
+max_length = 500
 ```
 
 ---
@@ -291,9 +325,11 @@ OCVoice/
 ├── ocvoice/
 │   ├── daemon.py          # Main daemon loop
 │   ├── config.py          # Config loader
+│   ├── __main__.py        # CLI entry point
 │   ├── cli/
 │   │   ├── select.py      # Interactive project/session picker
-│   │   └── ipc.py         # CLI↔daemon IPC
+│   │   ├── ipc.py         # CLI↔daemon IPC
+│   │   └── test_wake.py   # Wake word test tool
 │   ├── audio/
 │   │   ├── capture.py     # Audio capture
 │   │   ├── vad.py         # Voice Activity Detection
@@ -327,8 +363,7 @@ OCVoice/
 | `faster-whisper` | 142MB | High-accuracy STT / Точное распознавание |
 | `sounddevice` | <1MB | Audio capture / Захват аудио |
 | `webrtcvad` | <1MB | Voice activity detection / Детекция речи |
-| `resemblyzer` | 15MB | Speaker verification (primary) / Верификация голоса |
-| `speechbrain` | 1GB+ | Speaker verification (fallback) / Верификация (запасной) |
+| `resemblyzer` | 15MB | Speaker verification / Верификация голоса |
 | `edge-tts` | <1MB | Text-to-speech / Озвучивание ответов |
 | `numpy` | — | Audio processing / Обработка аудио |
 | `httpx` | — | HTTP client for OpenCode API |
@@ -338,5 +373,5 @@ OCVoice/
 | `customtkinter` | — | Settings GUI / Окно настроек |
 | `openwakeword` | — | Wake word detection (ONNX) / Детекция wake word |
 | `soundfile` | — | Audio file I/O / Чтение/запись аудиофайлов |
-| `difflib` | stdlib | Fuzzy matching for projects/sessions / Нечёткий поиск |
+| `difflib` | stdlib | Fuzzy matching / Нечёткий поиск |
 | `sqlite3` | stdlib | OpenCode DB reader / Чтение БД проектов/сессий |
