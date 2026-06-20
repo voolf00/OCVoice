@@ -30,6 +30,7 @@ class OCVoiceMenuBar(rumps.App if HAS_RUMPS else object):
         self._server_url: str = ""
         self._all_projects: list[dict] = []
         self._language: str = "ru"
+        self._state: str = "waiting"
 
         if not HAS_RUMPS:
             self._running = False
@@ -202,21 +203,34 @@ class OCVoiceMenuBar(rumps.App if HAS_RUMPS else object):
         "stopped": "🔴",
     }
 
+    def _update_icon(self):
+        """Set menubar icon based on current state (overrides listening icon)."""
+        icon = self.STATE_ICONS.get(self._state)
+        if icon:
+            self.title = icon
+
     def set_state_indicator(self, state: str):
-        icon = self.STATE_ICONS.get(state, "🎤")
-        self.title = icon
+        self._state = state
+        self._update_icon()
 
     def set_listening(self, active: bool):
-        self.title = "🟢" if active else "🔴"
+        if active:
+            self._state = "waiting"
+        else:
+            self._state = "stopped"
+        self._update_icon()
 
     def set_processing(self):
-        self.title = "🟡"
+        self._state = "cmd"
+        self._update_icon()
 
     def set_ready(self):
-        self.title = "🟢"
+        self._state = "waiting"
+        self._update_icon()
 
     def set_error(self):
-        self.title = "🔴"
+        self._state = "stopped"
+        self._update_icon()
 
     def show_notification(self, title: str, message: str):
         try:
