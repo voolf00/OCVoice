@@ -650,6 +650,7 @@ class VoiceDaemon:
                 if self._vosk:
                     self._vosk.reset()
                 if cmd:
+                    self._set_state("awaiting")
                     self._beep(800, 0.1)
                     print(f"[OCVoice] ✅ Sending: \"{cmd}\"", flush=True)
                     threading.Thread(target=self._execute_command_from_text, args=(cmd,), daemon=True).start()
@@ -719,19 +720,28 @@ class VoiceDaemon:
             self._execute_command(cmd)
             return
 
-        # SEND_MESSAGE — async отправка (не ждём ответ AI)
+        # SEND_MESSAGE — отправка с ожиданием ответа AI
         if not self.client or not self.client.session_id:
             print(f"[OCVoice] ❌ Нет сессии для отправки", flush=True)
             self._set_state("waiting")
             return
 
         try:
-            self.client.send_prompt_async(text)
-            print(f"[OCVoice] ✅ Отправлено асинхронно", flush=True)
-            self._beep(1200, 0.08)
+            response = self.client.send_message(text)
+            response_text = self._extract_response_text(response)
+            if response_text:
+                print(f"  ✅ Ответ AI:", flush=True)
+                for line in response_text[:600].split('\n'):
+                    print(f"  │ {line}", flush=True)
+                self._show_response(response_text)
+            else:
+                print(f"  ⚠️ AI вернул пустой ответ", flush=True)
+            if response_text and self.config.tts_enabled:
+                self._speak_response(response_text)
+            self._set_state("waiting")
         except Exception as e:
-            print(f"[OCVoice] ❌ Ошибка async: {e}", flush=True)
-            self._send_message(text)
+            print(f"[OCVoice] ❌ Ошибка отправки: {e}", flush=True)
+            self._set_state("waiting")
 
     def _process_always_on_mode(self, chunk: np.ndarray):
         """Always-on mode: continuously listen and detect speech segments."""
