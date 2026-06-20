@@ -256,7 +256,14 @@ class SettingsWindow:
             scroll, text="Enabled", variable=self.speaker_var,
             font=ctk.CTkFont(size=13),
         )
-        self.speaker_switch.pack(anchor="w", pady=(4, 10))
+        self.speaker_switch.pack(anchor="w", pady=(4, 5))
+
+        ctk.CTkButton(
+            scroll, text="🎙 Re-enroll Voice",
+            command=self._action_enroll,
+            fg_color="#555555", hover_color="#444444",
+            height=32, font=ctk.CTkFont(size=12),
+        ).pack(anchor="w", pady=(0, 10))
 
         # TTS toggle
         ctk.CTkLabel(scroll, text="💬 Text-to-Speech", anchor="w",
@@ -463,6 +470,14 @@ class SettingsWindow:
         _save_config(self.cfg)
         _send_reload_ipc()
         self.win.destroy()
+
+    def _action_enroll(self):
+        """Close settings and launch voice enrollment."""
+        self.win.destroy()
+        import subprocess, sys
+        subprocess.Popen(
+            [sys.executable, "-m", "ocvoice", "enroll"],
+        )
 
     def _cancel(self):
         self.win.destroy()
