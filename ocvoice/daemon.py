@@ -373,6 +373,8 @@ class VoiceDaemon:
 
     def run(self):
         """Main entry — menu bar on main thread, audio loop in background."""
+        if not self._acquire_daemon_lock():
+            return
         if not self.setup():
             print("[OCVoice] Failed to initialize. Exiting.")
             return
@@ -1892,6 +1894,7 @@ class VoiceDaemon:
             self.client.close()
         if self.launcher:
             self.launcher.stop()
+        self._release_daemon_lock()
         print("[OCVoice] Daemon stopped.")
 
     def _on_menubar_toggle(self, enabled: bool):
@@ -2054,14 +2057,52 @@ class VoiceDaemon:
         """Return current language code for UI."""
         return self._language
 
+    DAEMON_PID = Path.home() / ".config" / "ocvoice" / "daemon.pid"
+
+    @staticmethod
+    def _acquire_daemon_lock() -> bool:
+        """Check if another daemon is running. Write PID file if not."""
+        pid_file = VoiceDaemon.DAEMON_PID
+        if pid_file.exists():
+            try:
+                pid = int(pid_file.read_text().strip())
+                os.kill(pid, 0)  # Check if process exists
+                print(f"[OCVoice] ❌ Демон уже запущен (PID {pid})")
+                print("   Запусти 'ocv stop' чтобы остановить")
+                return False
+            except (ProcessLookupError, ValueError, OSError):
+                # Stale PID
+                pid_file.unlink(missing_ok=True)
+        pid_file.parent.mkdir(parents=True, exist_ok=True)
+        pid_file.write_text(str(os.getpid()))
+        return True
+
+    @staticmethod
+    def _release_daemon_lock():
+        """Remove the daemon PID file."""
+        try:
+            VoiceDaemon.DAEMON_PID.unlink(missing_ok=True)
+        except Exception:
+            pass
+
     @staticmethod
     def print_status():
         """Print daemon status."""
         print("OCVoice Status:")
-        pid_file = Path.home() / ".config" / "ocvoice" / "opencode.pid"
+        pid_file = VoiceDaemon.DAEMON_PID
         if pid_file.exists():
             try:
                 pid = int(pid_file.read_text().strip())
+                print(f"  Daemon PID: {pid}")
+            except ValueError:
+                print("  Daemon PID: unknown")
+        else:
+            print("  Daemon PID: not running")
+
+        opencode_pid = Path.home() / ".config" / "ocvoice" / "opencode.pid"
+        if opencode_pid.exists():
+            try:
+                pid = int(opencode_pid.read_text().strip())
                 print(f"  OpenCode PID: {pid}")
             except ValueError:
                 print("  OpenCode PID: unknown")
@@ -2080,7 +2121,7 @@ class VoiceDaemon:
     @staticmethod
     def stop():
         """Stop a running daemon."""
-        pid_file = Path.home() / ".config" / "ocvoice" / "opencode.pid"
+        pid_file = VoiceDaemon.DAEMON_PID
         if pid_file.exists():
             try:
                 pid = int(pid_file.read_text().strip())
@@ -2090,9 +2131,9 @@ class VoiceDaemon:
                 else:
                     os.kill(pid, signal.SIGTERM)
                 print(f"[OCVoice] Sent stop signal to PID {pid}")
-                pid_file.unlink(missing_ok=True)
             except (ProcessLookupError, ValueError):
-                print("[OCVoice] Daemon not running. PID file cleaned up.")
+                print("[OCVoice] Daemon not running. Cleaning up.")
+            finally:
                 pid_file.unlink(missing_ok=True)
         else:
             print("[OCVoice] No daemon PID file found.")
