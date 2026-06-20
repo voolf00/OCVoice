@@ -11,6 +11,7 @@ import signal
 import sys
 import threading
 import time
+import traceback
 from pathlib import Path
 from typing import Optional
 
@@ -81,11 +82,23 @@ class VoiceDaemon:
         self._manual_session_until = 0.0
         self._selected_project_worktree: str = ""
         self._language: str = config.language
+        self._audio_lock = threading.Lock()
+        self._client_lock = threading.Lock()
+        self._ptt_mode = False
 
     def _notify(self, title: str, text: str):
         """Send desktop notification + always print to stderr for logs."""
         notify(title, text)
         print(f"[{title}] {text}", file=sys.stderr, flush=True)
+
+    @staticmethod
+    def _debug_log(msg: str, exc=None):
+        """Log a debug message with optional traceback."""
+        if exc:
+            tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+            print(f"[OCVoice] ⚠️ {msg}: {exc}\n{tb}", file=sys.stderr, flush=True)
+        else:
+            print(f"[OCVoice] ⚠️ {msg}", file=sys.stderr, flush=True)
 
     def _set_state(self, state: str):
         """Update all state indicators: session title, dock badge, state file.
@@ -100,8 +113,8 @@ class VoiceDaemon:
             try:
                 s = self.client.get_session(self.client.session_id)
                 self._session_timestamps[self.client.session_id] = s.get('time', {}).get('updated', 0)
-            except Exception:
-                pass
+            except Exception as e:
+                self._debug_log("Failed to save session timestamp", e)
 
         state_map = {
             "waiting":   ("🟢", "ожидает"),
@@ -117,8 +130,8 @@ class VoiceDaemon:
             try:
                 title = f"{icon} [OCVoice] {label}"
                 self.client.update_session(title=title, session_id=self._state_session_id)
-            except Exception:
-                pass
+            except Exception as e:
+                self._debug_log("Failed to update session title", e)
 
         # 2. Dock badge (macOS)
         if dock_label:
@@ -129,8 +142,8 @@ class VoiceDaemon:
                      f'tell application "System Events" to set badge of (first process whose name is "OpenCode") to "{dock_label}"'],
                     capture_output=True, timeout=2,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                self._debug_log("Failed to set dock badge", e)
 
         # 3. State file
         try:
@@ -634,6 +647,12 @@ class VoiceDaemon:
                     self._beep(800, 0.1)
                     print(f"[OCVoice] ✅ Sending: \"{cmd}\"", flush=True)
                     threading.Thread(target=self._execute_command_from_text, args=(cmd,), daemon=True).start()
+                # PTT mode: single command then stop listening
+                if self._ptt_mode:
+                    self._ptt_mode = False
+                    self._listening = False
+                    self._set_state("stopped")
+                    print(f"[OCVoice] 🔴 Push-to-talk: ожидание следующего F6", flush=True)
                 return
 
         # Показываем partial + отслеживаем тишину через VAD
@@ -1062,8 +1081,8 @@ class VoiceDaemon:
                             proj = self.client.get_current_project()
                             name = self._extract_project_name(proj)
                             print(f"  📁 Проект: {name}", flush=True)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            self._debug_log("Failed to write state file", e)
                         sid = self.client.session_id
                         if sid:
                             try:
@@ -1319,27 +1338,27 @@ class VoiceDaemon:
                 if cmd:
                     self._handle_ipc_command(cmd)
                     clear_command()
-            except Exception:
-                pass
+            except Exception as e:
+                self._debug_log("IPC command error", e)
 
             # ── Session tracking ──
             try:
                 self._check_session_changes()
-            except Exception:
-                pass
+            except Exception as e:
+                self._debug_log("Session check error", e)
 
             # ── UI menu update (tray or menubar) ──
             try:
                 self._update_ui_menu()
-            except Exception:
-                pass
+            except Exception as e:
+                self._debug_log("UI menu update error", e)
 
             poll_count += 1
             if poll_count % 5 == 0:
                 try:
                     self._recheck_ide_server()
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._debug_log("Server recheck error", e)
             time.sleep(2.0)
 
     def _handle_ipc_command(self, cmd: dict):
@@ -1382,6 +1401,15 @@ class VoiceDaemon:
                 self._vosk.reset()
             self._set_state("waiting")
             print(f"[OCVoice] ✅ Конфиг перезагружен", flush=True)
+        elif c == 'ptt':
+            print(f"[OCVoice] 🎤 Push-to-talk активирован", flush=True)
+            self._ptt_mode = True
+            if not self._listening:
+                self._listening = True
+            self._cmd_mode = False  # Allow new wake word / cmd mode
+            if self._vosk:
+                self._vosk.reset()
+            self._set_state("cmd")
 
     def _update_ui_menu(self):
         """Fetch current data and push to tray or menubar."""
@@ -1776,19 +1804,22 @@ class VoiceDaemon:
         self._beep(400, 0.15)
 
     def _beep(self, frequency: float, duration: float):
-        """Generate a short beep — allowed always (one beep on wake word)."""
+        """Generate a short beep — thread-safe."""
+        if not self._audio_lock.acquire(blocking=False):
+            return  # Skip if another beep is playing
         try:
             import sounddevice as sd
             sample_rate = 44100
             t = np.linspace(0, duration, int(sample_rate * duration), False)
             tone = 0.7 * np.sin(2 * np.pi * frequency * t)
-            # Apply fade in/out
             fade = int(0.01 * sample_rate)
             tone[:fade] *= np.linspace(0, 1, fade)
             tone[-fade:] *= np.linspace(1, 0, fade)
             sd.play(tone.astype(np.float32), sample_rate, blocking=False)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[OCVoice] ⚠️ Beep error: {e}", file=sys.stderr, flush=True)
+        finally:
+            self._audio_lock.release()
 
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals."""

@@ -101,6 +101,9 @@ def main():
         print("  ocvoice enroll          Enroll your voice for speaker verification")
         print("  ocvoice status          Show daemon status")
         print("  ocvoice stop            Stop voice daemon")
+        print("  ocvoice ptt             Push-to-talk (single command, no wake word)")
+        print("  ocvoice select session   Pick a session interactively")
+        print("  ocvoice select project   Pick a project interactively")
         print("  ocvoice config          Print current configuration")
         print("  ocvoice autostart install   Install LaunchAgent (macOS auto-start)")
         print("  ocvoice autostart uninstall Remove LaunchAgent")
@@ -134,6 +137,11 @@ def main():
         case "select":
             from .cli.select import main as select_main
             select_main(sys.argv[2:])
+        case "ptt":
+            from .cli.ipc import write_command
+            write_command("ptt")
+            print("🎤 Push-to-talk. Speak your command and say 'отправь'.")
+            print("   После отправки микрофон отключится автоматически.")
         case _:
             print(f"Unknown command: {command}")
             sys.exit(1)

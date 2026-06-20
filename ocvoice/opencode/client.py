@@ -6,6 +6,7 @@ sending, configuration updates, and TUI control.
 """
 
 from typing import Optional
+import threading
 
 import httpx
 
@@ -27,25 +28,28 @@ class OpenCodeClient:
     ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self._auth = auth  # (username, password) for basic auth
+        self._auth = auth
         self._client: Optional[httpx.Client] = None
         self._session_id: Optional[str] = None
         self._prefix = prefix.rstrip("/")
+        self._lock = threading.Lock()
 
     @property
     def client(self) -> httpx.Client:
-        if self._client is None:
-            self._client = httpx.Client(
-                base_url=self.base_url,
-                timeout=httpx.Timeout(self.timeout),
-                auth=self._auth,
-            )
-        return self._client
+        with self._lock:
+            if self._client is None:
+                self._client = httpx.Client(
+                    base_url=self.base_url,
+                    timeout=httpx.Timeout(self.timeout),
+                    auth=self._auth,
+                )
+            return self._client
 
     def close(self):
-        if self._client:
-            self._client.close()
-            self._client = None
+        with self._lock:
+            if self._client:
+                self._client.close()
+                self._client = None
 
     # ─── Health ───
 

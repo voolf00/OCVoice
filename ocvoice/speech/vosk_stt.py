@@ -150,7 +150,7 @@ class VoskSTT:
         self._load_model(lang)
 
     def _get_or_download_model(self, lang: str) -> str:
-        """Get model path, download if needed."""
+        """Get model path, download if needed with progress bar."""
         cache_dir = os.path.expanduser("~/.cache/ocvoice/vosk")
         model_dir_name = MODEL_DIR_NAMES.get(lang, MODEL_DIR_NAMES["ru"])
         model_path = os.path.join(cache_dir, model_dir_name)
@@ -158,25 +158,44 @@ class VoskSTT:
         if os.path.exists(os.path.join(model_path, "am")):
             return model_path
 
-        # Download
-        import urllib.request
+        # Download with progress
+        import io
         import zipfile
 
         url = MODEL_URLS.get(lang, MODEL_URLS["ru"])
         zip_path = os.path.join(cache_dir, f"{model_dir_name}.zip")
-
         os.makedirs(cache_dir, exist_ok=True)
 
         if not os.path.exists(zip_path):
-            print(f"[OCVoice] Downloading Vosk model ({model_dir_name})...")
-            print(f"[OCVoice] URL: {url}")
-            urllib.request.urlretrieve(url, zip_path)
-            print(f"[OCVoice] Downloaded")
+            print(f"[OCVoice] 📥 Downloading Vosk model ({model_dir_name})...")
+            import httpx
+            try:
+                response = httpx.get(url, follow_redirects=True, timeout=300)
+                total = int(response.headers.get("content-length", 0))
+                downloaded = 0
+                with open(zip_path, "wb") as f:
+                    for chunk in response.iter_bytes(chunk_size=8192):
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total:
+                            pct = downloaded * 100 // total
+                            mb_dl = downloaded // (1024 * 1024)
+                            mb_total = total // (1024 * 1024)
+                            print(f"\r  📥 {pct}% ({mb_dl}MB / {mb_total}MB)", end="", file=sys.stderr)
+                if total:
+                    print(file=sys.stderr)
+            except Exception as e:
+                print(f"[OCVoice] ❌ Download failed: {e}", file=sys.stderr)
+                if os.path.exists(zip_path):
+                    os.remove(zip_path)
+                # Fallback to urllib
+                import urllib.request
+                urllib.request.urlretrieve(url, zip_path)
 
-        print(f"[OCVoice] Extracting model...")
+        print(f"[OCVoice] 📦 Extracting model...", file=sys.stderr)
         with zipfile.ZipFile(zip_path, "r") as zf:
             zf.extractall(cache_dir)
-        print(f"[OCVoice] Model ready at {model_path}")
+        print(f"[OCVoice] ✅ Model ready at {model_path}", file=sys.stderr)
 
         return model_path
 
