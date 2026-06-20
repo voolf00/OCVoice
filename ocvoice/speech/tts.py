@@ -237,6 +237,10 @@ class TextToSpeech:
             text = re.sub(r'```[\s\S]*?```', '', text)
             text = re.sub(r'~~~[\s\S]*?~~~', '', text)
 
+        # 1b. Remove indented code blocks (4+ spaces at line start, multi-line)
+        if not self.read_code:
+            text = re.sub(r'(?:^[ \t]{4,}.*\n?)+', '', text, flags=re.MULTILINE)
+
         # 2. Remove inline `code` (replace with its content)
         text = re.sub(r'`([^`]+)`', r'\1', text)
 
