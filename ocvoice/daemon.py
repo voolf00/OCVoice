@@ -1225,11 +1225,9 @@ class VoiceDaemon:
             print(f"[OCVoice] Command execution error: {e}")
             if self.tray:
                 self.tray.update("error")
-        else:
-            if self.tray and command.intent not in (Intent.STOP_LISTENING, Intent.START_LISTENING):
-                self.tray.update("ready")
-            if command.intent not in (Intent.STOP_LISTENING, Intent.START_LISTENING):
-                self._set_state("waiting")
+        if command.intent not in (Intent.STOP_LISTENING, Intent.START_LISTENING):
+            # Always reset state after command (even on error)
+            self._set_state("waiting")
 
     def _init_state_session(self):
         """Create the status indicator session and clean up old ones."""
