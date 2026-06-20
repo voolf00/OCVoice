@@ -155,6 +155,7 @@ INTENT_PATTERNS_RU = [
     (Intent.SWITCH_MODE, [
         r"(?:включи|переключи|поставь)\s+(?:режим\s+)?(plan|build|план|код|билд)",
         r"(plan|build|план|билд)\s+mode",
+        r"(plan|build|план|билд)\s+мод",
         r"режим\s+(plan|build|план|билд)",
         r"mode\s+(plan|build)",
     ]),

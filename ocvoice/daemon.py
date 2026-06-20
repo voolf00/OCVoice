@@ -1133,6 +1133,7 @@ class VoiceDaemon:
                     print(f"  ✅ {msg}", flush=True)
                     if self._headless:
                         self._notify("OCVoice 🔄", msg)
+                    self._update_ui_menu()
 
                 case Intent.TOGGLE_THINKING:
                     self._ensure_connected()
@@ -1150,6 +1151,7 @@ class VoiceDaemon:
                     self._ensure_connected()
                     self.client.update_config({"default_agent": agent})
                     print(f"  ✅ Агент: {agent}", flush=True)
+                    self._update_ui_menu()
 
                 case Intent.SEND_MESSAGE:
                     self._ensure_connected()
