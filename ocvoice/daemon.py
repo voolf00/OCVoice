@@ -583,14 +583,13 @@ class VoiceDaemon:
                 if self.speaker and self.config.speaker_enabled:
                     v = self.speaker.verify(verify_audio)
                     score = v.get("score", 0)
-                    in_grace = time.time() - self._start_time < 30
                     if score < 0.1:
                         print(f"[OCVoice] 🔍 Wake '{wake_match}' score={score:.2f} — skip verify (model issue)", flush=True)
                     elif not v.get("match", False):
-                        if in_grace and score >= 0.25:
-                            print(f"[OCVoice] 🔍 Wake '{wake_match}' grace={score:.2f} — accepted (startup)", flush=True)
+                        if score >= 0.25:
+                            print(f"[OCVoice] 🔍 Wake '{wake_match}' partial={score:.2f} — accepted (low threshold)", flush=True)
                         else:
-                            print(f"[OCVoice] 🔍 Wake '{wake_match}' voice mismatch ({score:.2f}) — ignored", flush=True)
+                            print(f"[OCVoice] 🔍 Wake '{wake_match}' too low ({score:.2f}) — ignored", flush=True)
                             return
                 # ✅ Wake word + speaker verified
                 self._beep(1000, 0.2)

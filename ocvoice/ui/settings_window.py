@@ -130,7 +130,14 @@ class SettingsWindow:
         ctk.CTkLabel(scroll, text="Comma-separated. Say one of these to activate listening.",
                       anchor="w", font=ctk.CTkFont(size=11)).pack(fill="x")
         self.wake_entry = ctk.CTkEntry(scroll, height=35)
-        self.wake_entry.pack(fill="x", pady=(4, 10))
+        self.wake_entry.pack(fill="x", pady=(4, 5))
+
+        ctk.CTkButton(
+            scroll, text="🧪 Test wake word",
+            command=self._action_test_wake,
+            fg_color="#555555", hover_color="#444444",
+            height=28, font=ctk.CTkFont(size=12),
+        ).pack(anchor="w", pady=(0, 10))
 
         # Send phrases
         ctk.CTkLabel(scroll, text="✉️ Send Phrases", anchor="w",
@@ -420,6 +427,14 @@ class SettingsWindow:
         except Exception:
             pass
         return devices
+
+    def _action_test_wake(self):
+        """Close settings and test wake word detection."""
+        self.win.destroy()
+        import subprocess, sys
+        subprocess.Popen(
+            [sys.executable, "-m", "ocvoice", "test-wake"],
+        )
 
     def _on_timeout_change(self, val):
         self.timeout_label.configure(text=f"{val:.1f}s")

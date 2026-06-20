@@ -105,6 +105,7 @@ def main():
         print("  ocvoice select session   Pick a session interactively")
         print("  ocvoice select project   Pick a project interactively")
         print("  ocvoice config          Print current configuration")
+        print("  ocvoice test-wake       Test wake word detection (10s)")
         print("  ocvoice autostart install   Install LaunchAgent (macOS auto-start)")
         print("  ocvoice autostart uninstall Remove LaunchAgent")
         print("  ocvoice autostart status    Check LaunchAgent status")
@@ -142,6 +143,9 @@ def main():
             write_command("ptt")
             print("🎤 Push-to-talk. Speak your command and say 'отправь'.")
             print("   После отправки микрофон отключится автоматически.")
+        case "test-wake":
+            from .cli.test_wake import test_wake
+            test_wake()
         case _:
             print(f"Unknown command: {command}")
             sys.exit(1)
