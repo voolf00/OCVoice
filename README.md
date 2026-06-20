@@ -17,18 +17,19 @@
 
 - 🎤 Voice control — switch projects, sessions, agents, models by voice
 - 🧠 Speech recognition: **Vosk** (real-time, offline) + **faster-whisper** (high accuracy, fallback)
-- 🔒 **Speaker verification** (Resemblyzer / SpeechBrain) — only your voice gets through
+- 🔒 **Speaker verification** (Resemblyzer / SpeechBrain) — only your voice gets through; low threshold (score ≥ 0.25) for reliable detection
 - 🏃 **Streaming** — words appear as you speak, no 3-second windows
 - 📁 **Project-aware** — select projects from your OpenCode Desktop; sessions filter automatically
 - 🔍 **Fuzzy matching** — say project names in any language ("дипстрим" → DeepStream3, "mayak" → Maiak)
 - 💬 **Voice session switching** — "последняя сессия", "переключись на сессию...", "открой проект..."
 - 🤖 **Agent switching** — "план мод" / "билд мод" — switch between Plan and Build agents
-- 🎙 **Voice enrollment** — inline in Settings window with progress bar
-- ⚙️ **Settings GUI** — CustomTkinter window: wake words, send phrases, language, sensitivity, TTS voice
-- 🗣️ **Smart TTS** — skips code blocks, arrows, formatting — reads only natural text
+- 🧪 **Wake word test** — inline in Settings: checks Vosk detection + speaker verification score
+- 🎙 **Voice enrollment** — inline in Settings window with progress bar and countdown
+- ⚙️ **Settings GUI** — CustomTkinter window: wake words, send phrases, language, sensitivity, TTS voice, device
+- 🗣️ **Smart TTS** — skips code blocks, arrows, formatting — reads only natural text (no crackling)
 - 🔵 **State indicators** — icon in menubar/tray changes: 🟢 → 🔵 → 🟣 → 🟢
-- 🎤 **Live audio device switching** — change microphone in Settings, applies immediately
-- 🔒 **Singleton lock** — prevents multiple daemon instances
+- 🎤 **Live audio device switching** — change microphone in Settings, applies immediately without restart
+- 🔒 **Singleton lock** — prevents multiple daemon instances (PID file)
 - ⏱ 10s silence → auto-send; "отправь" → instant send
 - macOS / Windows / Linux
 
@@ -154,15 +155,16 @@ voice_en = "en-US-JennyNeural"
 
 - 🎤 Голосовое управление — переключение проектов, сессий, агентов, моделей голосом
 - 🧠 Распознавание: **Vosk** (стриминг, реальное время) + **faster-whisper** (точность, фолбек)
-- 🔒 **Верификация голоса** (Resemblyzer / SpeechBrain) — только ваш голос
+- 🔒 **Верификация голоса** (Resemblyzer / SpeechBrain) — только ваш голос; низкий порог (score ≥ 0.25)
 - 🏃 **Стриминг** — слова по мере говорения, без окон по 3 секунды
 - 📁 **Проекты** — выбор проекта из OpenCode Desktop; сессии фильтруются автоматически
 - 🔍 **Fuzzy поиск** — называй проекты на любом языке ("дипстрим" → DeepStream3, "mayak" → Maiak)
 - 💬 **Голосовое переключение** — "последняя сессия", "переключись на сессию...", "открой проект..."
 - 🤖 **Агенты** — "план мод" / "билд мод" — переключение Plan/Build
-- 🎙 **Запись голоса** — прямо в окне настроек с прогрессом
-- ⚙️ **Окно настроек** — CustomTkinter: wake words, send phrases, язык, TTS голос
-- 🗣️ **Умный TTS** — пропускает код и форматирование, читает только текст
+- 🧪 **Тест wake word** — в настройках: проверка Vosk + speaker verification
+- 🎙 **Запись голоса** — прямо в окне настроек с прогрессом и отсчётом
+- ⚙️ **Окно настроек** — CustomTkinter: wake words, send phrases, язык, TTS голос, устройство
+- 🗣️ **Умный TTS** — пропускает код и форматирование, читает только текст (без треска)
 - 🔵 **Индикация** в меню-баре/трее: 🟢 → 🔵 → 🟣 → 🟢
 - 🎤 **Переключение девайса** — смени микрофон в настройках, работает без перезапуска
 - 🔒 **Один экземпляр** — защита от запуска двух демонов
