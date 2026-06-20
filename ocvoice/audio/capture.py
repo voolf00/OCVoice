@@ -18,6 +18,9 @@ except ImportError:
     HAS_SOUNDDEVICE = False
 
 
+# ─── class AudioCapture ───────────────────────────────
+# Real-time audio capture via sounddevice InputStream
+
 class AudioCapture:
     """Captures audio from the default microphone into a ring buffer."""
 
@@ -157,6 +160,9 @@ class AudioCapture:
                       f"sr: {d['default_samplerate']:.0f})")
 
     @staticmethod
+# ─── def auto_detect_device ───────────────────────────────
+# Find best input mic (prefer built-in)
+
     def auto_detect_device() -> int:
         """Auto-detect best input device. Prefers built-in mic, avoids iPhone/Bluetooth."""
         if not HAS_SOUNDDEVICE:

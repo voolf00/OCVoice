@@ -39,6 +39,9 @@ class ParsedCommand:
                 f"text='{self.text[:50]}', confidence={self.confidence:.2f})")
 
 
+# ─── class RegexIntentParser ───────────────────────────────
+# Regex intent parser — RU + EN patterns
+
 class RegexIntentParser:
     """Rule-based intent parser using regex patterns."""
 
@@ -100,6 +103,9 @@ class RegexIntentParser:
             raw_text=text,
             confidence=0.5,
         )
+
+# ─── def _strip_wake_words ───────────────────────────────
+# Remove дарвин/darwin/okey code from text
 
     def _strip_wake_words(self, text: str) -> str:
         """Remove known wake words from the text."""
@@ -210,6 +216,9 @@ class RegexIntentParser:
 
         return args
 
+
+# ─── class IntentParser ───────────────────────────────
+# Master parser with model/mode alias resolution
 
 class IntentParser:
     """Main intent parser with configurable strategy."""

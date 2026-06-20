@@ -89,6 +89,9 @@ class SpeakerVerifier:
         self._loaded = True
         self._backend = "none"
 
+# ─── def enroll( name ───────────────────────────────
+# Record voice → create embedding → save to disk
+
     def enroll(self, name: str = "default", duration: float = 10.0):
         """Enroll a speaker's voice.
 
@@ -131,6 +134,9 @@ class SpeakerVerifier:
         print(f"{'='*50}\n")
         return True
 
+# ─── def enroll_from_audio ───────────────────────────────
+# Enroll from pre-recorded audio (settings window)
+
     def enroll_from_audio(self, audio: np.ndarray, sample_rate: int, name: str = "default") -> bool:
         """Enroll a speaker from already-recorded audio.
 
@@ -158,6 +164,9 @@ class SpeakerVerifier:
             return False
         self._save_embedding(name, embedding)
         return True
+
+# ─── def verify( audio ───────────────────────────────
+# Cosine similarity against enrolled embedding
 
     def verify(self, audio: np.ndarray, name: str = "default") -> dict:
         """Verify that audio matches the enrolled speaker.

@@ -117,6 +117,9 @@ LANGUAGE_ORDER = ["ru", "cn", "en"] + sorted(
 )
 
 
+# ─── class VoskSTT ───────────────────────────────
+# Streaming STT — each chunk → partial text in real-time
+
 class VoskSTT:
     """Streaming speech recognition using Vosk."""
 
@@ -140,6 +143,9 @@ class VoskSTT:
         self._rec = KaldiRecognizer(self._model, self.sample_rate)
         self._rec.SetWords(True)
 
+# ─── def set_lang ───────────────────────────────
+# Switch Vosk model at runtime (download if needed)
+
     def set_lang(self, lang: str):
         """Switch to a different language model at runtime."""
         if lang == self.lang and self._model:
@@ -148,6 +154,9 @@ class VoskSTT:
         self._partial = ""
         self._final_parts = []
         self._load_model(lang)
+
+# ─── def _get_or_download_model ───────────────────────────────
+# Download with progress bar via httpx streaming
 
     def _get_or_download_model(self, lang: str) -> str:
         """Get model path, download if needed with progress bar."""

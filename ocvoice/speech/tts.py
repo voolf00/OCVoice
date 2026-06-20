@@ -16,6 +16,9 @@ from typing import Optional
 import numpy as np
 
 
+# ─── class EdgeTTS ───────────────────────────────
+# Edge TTS (cloud, high quality, many voices)
+
 class EdgeTTS:
     """Text-to-Speech using Microsoft Edge TTS (free, online)."""
 
@@ -70,6 +73,9 @@ class EdgeTTS:
                 audio_chunks.append(chunk["data"])
         return b"".join(audio_chunks)
 
+
+# ─── class PiperTTS ───────────────────────────────
+# Piper TTS (offline, lightweight)
 
 class PiperTTS:
     """Text-to-Speech using Piper TTS (offline).
@@ -165,6 +171,9 @@ class PiperTTS:
         return None
 
 
+# ─── class TextToSpeech ───────────────────────────────
+# Master TTS with language detection + text cleaning
+
 class TextToSpeech:
     """Unified TTS interface with auto language detection."""
 
@@ -227,6 +236,9 @@ class TextToSpeech:
         if russian_chars > len(text) * 0.3:
             return "ru"
         return "en"
+
+# ─── def _clean_text ───────────────────────────────
+# Strip code, formatting, symbols for clean speech output
 
     def _clean_text(self, text: str) -> str:
         """Prepare text for speech: strip code, formatting, symbols."""
@@ -291,6 +303,9 @@ class TextToSpeech:
 
         return text.strip()
 
+# ─── def _play_audio ───────────────────────────────
+# Write MP3 bytes to temp file, play, cleanup
+
     def _play_audio(self, audio: bytes):
         """Play audio bytes (MP3 from Edge TTS)."""
         import tempfile
@@ -312,6 +327,9 @@ class TextToSpeech:
                     pass
 
     @staticmethod
+# ─── def _play_file ───────────────────────────────
+# macOS: afplay. Linux/Win: ffmpeg + sounddevice
+
     def _play_file(path: str):
         """Play an audio file using the best available method."""
         import platform

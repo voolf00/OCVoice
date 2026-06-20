@@ -141,6 +141,9 @@ def _env_overrides(config: dict) -> dict:
     return config
 
 
+# ─── class Config ───────────────────────────────
+# Config with file/env/CLI overrides + save
+
 class Config:
     """OCVoice configuration with attribute-style access."""
 

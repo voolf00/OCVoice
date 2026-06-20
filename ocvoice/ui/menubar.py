@@ -16,6 +16,9 @@ except ImportError:
     HAS_RUMPS = False
 
 
+# ─── class OCVoiceMenuBar ───────────────────────────────
+# macOS menu bar via rumps — sessions/projects/agent
+
 class OCVoiceMenuBar(rumps.App if HAS_RUMPS else object):
     """Menu bar icon for OCVoice with session/project selection."""
 
@@ -217,6 +220,9 @@ class OCVoiceMenuBar(rumps.App if HAS_RUMPS else object):
         "stopped": "🔴",
     }
 
+# ─── def _update_icon ───────────────────────────────
+# Set menubar icon: 🟢🔵🟣🔴 based on state
+
     def _update_icon(self):
         """Set menubar icon based on current state (overrides listening icon)."""
         icon = self.STATE_ICONS.get(self._state)
@@ -261,6 +267,9 @@ class OCVoiceMenuBar(rumps.App if HAS_RUMPS else object):
     def is_running(self) -> bool:
         return self._running
 
+
+# ─── class MenuBarManager ───────────────────────────────
+# Menu bar lifecycle (start/stop/update)
 
 class MenuBarManager:
     """Manages the menu bar app lifecycle."""

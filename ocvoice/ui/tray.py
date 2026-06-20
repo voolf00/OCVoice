@@ -17,6 +17,9 @@ except ImportError:
     _HAS_PYSTRAY = False
 
 
+# ─── class TrayIcon ───────────────────────────────
+# System tray (Linux/Win) via pystray
+
 class TrayIcon:
     """System tray icon — works on Linux/Windows with threading."""
 
@@ -315,6 +318,9 @@ class TrayIcon:
     def is_running(self) -> bool:
         return self._running
 
+
+# ─── class TrayManager ───────────────────────────────
+# Tray lifecycle manager
 
 class TrayManager:
     """Manages the tray icon lifecycle and communicates with the daemon."""
