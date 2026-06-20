@@ -31,6 +31,7 @@ class OCVoiceMenuBar(rumps.App if HAS_RUMPS else object):
         self._all_projects: list[dict] = []
         self._language: str = "ru"
         self._state: str = "waiting"
+        self._current_agent: str = "build"
 
         if not HAS_RUMPS:
             self._running = False
@@ -110,6 +111,17 @@ class OCVoiceMenuBar(rumps.App if HAS_RUMPS else object):
         self.menu.add(None)
         self.menu.add(rumps.MenuItem("🎤 Start", callback=self._action_start))
         self.menu.add(rumps.MenuItem("🔇 Stop", callback=self._action_stop))
+
+        # Agent submenu
+        agent_menu = rumps.MenuItem("🤖 Agent")
+        cb = self._callbacks.get('on_agent_switch')
+        for label, aid in [("🤖 Plan", "plan"), ("🔧 Build", "build")]:
+            mark = "✓ " if self._current_agent == aid else "  "
+            item = rumps.MenuItem(f"{mark}{label}",
+                callback=lambda _, _id=aid, _cb=cb: _cb(_id) if _cb else None)
+            agent_menu.add(item)
+        self.menu.add(agent_menu)
+
         self.menu.add(None)
         self.menu.add(rumps.MenuItem("⚙️ Settings", callback=self._action_settings))
         self.menu.add(None)
@@ -141,7 +153,7 @@ class OCVoiceMenuBar(rumps.App if HAS_RUMPS else object):
     def update_menu(self, sessions=None, projects=None,
                     current_session_id="", current_project_name="",
                     server_url="", all_projects=None,
-                    language=""):
+                    language="", current_agent=""):
         self._pending = (
             sessions or [],
             projects or [],
@@ -150,12 +162,13 @@ class OCVoiceMenuBar(rumps.App if HAS_RUMPS else object):
             server_url or "",
             all_projects or [],
             language or "",
+            current_agent or "",
         )
 
     @rumps.timer(2) if HAS_RUMPS else (lambda f: f)
     def _timer_check(self, sender=None):
         if self._pending:
-            s, p, sid, pn, url, ap, lang = self._pending
+            s, p, sid, pn, url, ap, lang, agent = self._pending
             self._pending = None
             self._sessions = s
             self._projects = p
@@ -164,6 +177,7 @@ class OCVoiceMenuBar(rumps.App if HAS_RUMPS else object):
             self._server_url = url
             self._all_projects = ap
             self._language = lang or self._language
+            self._current_agent = agent or self._current_agent
             self._build_menu()
 
     def _action_start(self, sender):
@@ -258,7 +272,7 @@ class MenuBarManager:
 
     def start(self, on_toggle=None, on_quit=None,
               on_select_session=None, on_select_project=None,
-              on_language_switch=None,
+              on_language_switch=None, on_agent_switch=None,
               on_find_server=None,
               on_new_session=None):
         if sys.platform != "darwin":
@@ -275,16 +289,16 @@ class MenuBarManager:
             'on_select_session': on_select_session,
             'on_select_project': on_select_project,
             'on_language_switch': on_language_switch,
+            'on_agent_switch': on_agent_switch,
             'on_find_server': on_find_server,
             'on_new_session': on_new_session,
         }
         self._app = OCVoiceMenuBar(callbacks)
-        # App runs on main thread via VoiceDaemon._run_menu_bar()
 
     def update_menu(self, sessions=None, projects=None,
                     current_session_id="", current_project_name="",
                     server_url="", all_projects=None,
-                    language=""):
+                    language="", current_agent=""):
         if self._app:
             self._app.update_menu(
                 sessions or [],
@@ -294,6 +308,7 @@ class MenuBarManager:
                 server_url or "",
                 all_projects or [],
                 language or "",
+                current_agent or "",
             )
 
     def update_status(self, status: str):

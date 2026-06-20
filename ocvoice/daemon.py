@@ -336,6 +336,7 @@ class VoiceDaemon:
                     on_select_session=self._on_tray_select_session,
                     on_select_project=self._on_tray_select_project,
                     on_language_switch=self._on_language_switch,
+                    on_agent_switch=self._on_tray_agent_switch,
                     on_find_server=self._on_tray_find_server,
                     on_new_session=self._on_tray_new_session,
                 )
@@ -352,6 +353,7 @@ class VoiceDaemon:
                     on_select_session=self._on_tray_select_session,
                     on_select_project=self._on_tray_select_project,
                     on_language_switch=self._on_language_switch,
+                    on_agent_switch=self._on_tray_agent_switch,
                     on_find_server=self._on_tray_find_server,
                     on_new_session=self._on_tray_new_session,
                 )
@@ -1454,6 +1456,7 @@ class VoiceDaemon:
             server_url=str(self.client.client.base_url) if self.client else "",
             all_projects=all_projects,
             language=self._language,
+            current_agent=self._current_agent,
         )
         if self.menubar:
             self.menubar.update_menu(**kwargs)
@@ -1974,6 +1977,16 @@ class VoiceDaemon:
             print(f"[OCVoice] ✚ Tray: создана новая сессия {s['id'][:16]}...", flush=True)
         except Exception as e:
             print(f"[OCVoice] ✚ Tray: ошибка создания сессии — {e}", flush=True)
+
+    def _on_tray_agent_switch(self, agent_id: str):
+        """Handle agent switch from tray/menubar menu."""
+        if agent_id not in ("plan", "build"):
+            return
+        self._current_agent = agent_id
+        icon = "🤖" if agent_id == "plan" else "🔧"
+        print(f"[OCVoice] {icon} Агент: {agent_id}", flush=True)
+        self._update_ui_menu()
+        self._beep(660, 0.1)
 
     def _on_tray_select_project(self, worktree: str):
         """Handle project selection from tray/menubar menu."""
