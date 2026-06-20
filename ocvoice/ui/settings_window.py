@@ -134,10 +134,16 @@ class SettingsWindow:
 
         ctk.CTkButton(
             scroll, text="🧪 Test wake word",
-            command=self._action_test_wake,
+            command=self._start_wake_test,
             fg_color="#555555", hover_color="#444444",
             height=28, font=ctk.CTkFont(size=12),
-        ).pack(anchor="w", pady=(0, 10))
+        ).pack(anchor="w", pady=(0, 5))
+
+        self.wt_status = ctk.CTkLabel(scroll, text="", anchor="w",
+                                       font=ctk.CTkFont(size=12), text_color="#888888")
+        self.wt_progress = ctk.CTkProgressBar(scroll, width=300)
+        self.wt_result = ctk.CTkLabel(scroll, text="", anchor="w",
+                                       font=ctk.CTkFont(size=11), text_color="#aaaaaa", wraplength=400)
 
         # Send phrases
         ctk.CTkLabel(scroll, text="✉️ Send Phrases", anchor="w",
@@ -428,13 +434,148 @@ class SettingsWindow:
             pass
         return devices
 
-    def _action_test_wake(self):
-        """Close settings and test wake word detection."""
-        self.win.destroy()
-        import subprocess, sys
-        subprocess.Popen(
-            [sys.executable, "-m", "ocvoice", "test-wake"],
-        )
+    def _start_wake_test(self):
+        """Test wake word detection inline with progress."""
+        import sounddevice as sd
+        import numpy as np
+        import re
+        from ..speech.vosk_stt import VoskSTT
+        from ..audio.capture import AudioCapture
+        from ..config import Config
+
+        self.wt_status.pack(anchor="w")
+        self.wt_progress.pack(anchor="w", pady=(2, 2), fill="x")
+        self.wt_progress.set(0)
+        self.wt_result.pack(anchor="w")
+
+        cfg = Config()
+        device_id = cfg.audio_device
+        if device_id < 1:
+            device_id = AudioCapture.auto_detect_device()
+
+        wt = wake_words = cfg.wake_words
+        self.wt_status.configure(text="⏳ Loading Vosk...")
+        self.wt_progress.set(0.05)
+
+        self._wt_phase = 0
+        self._wt_done = False
+        self._wt_ok = False
+        self._wt_msg = ""
+
+        def _run():
+            try:
+                vosk = VoskSTT(lang=cfg.language)
+                self._wt_phase = 1  # recording
+
+                capture = AudioCapture(
+                    sample_rate=16000, channels=1,
+                    device_id=device_id, chunk_size=1024,
+                )
+                capture.start()
+
+                verify_buf = []
+                max_verify = int(3.0 * 16000)
+                start = time.time()
+                vosk_fuzzy = {"дарвин": "дарвин", "дарви": "дарвин", "darwin": "дарвин"}
+
+                while time.time() - start < 15:
+                    chunk = capture.read(1024, timeout=0.5)
+                    if len(chunk) == 0:
+                        continue
+
+                    verify_buf.append(chunk)
+                    vl = sum(len(c) for c in verify_buf)
+                    while vl > max_verify * 3:
+                        verify_buf.pop(0)
+                        vl = sum(len(c) for c in verify_buf)
+
+                    vosk.process(chunk)
+                    partial = vosk.get_partial()
+                    if not partial:
+                        continue
+
+                    clean = re.sub(r'[^\w\s]', '', partial.lower())
+                    for ww in wt:
+                        if re.sub(r'[^\w\s]', '', ww.lower()) in clean:
+                            # Wake word detected
+                            self._wt_phase = 2
+                            elapsed = time.time() - start
+                            self._wt_msg = f"✅ Vosk detected: \"{ww}\" ({elapsed:.1f}s)"
+
+                            # Test speaker verification
+                            if cfg.speaker_enabled and verify_buf:
+                                from ..speech.speaker import SpeakerVerifier
+                                verifier = SpeakerVerifier(cfg)
+                                if verifier.is_enrolled():
+                                    audio = np.concatenate(verify_buf)
+                                    if len(audio) > max_verify:
+                                        audio = audio[-max_verify:]
+                                    v = verifier.verify(audio)
+                                    score = v.get("score", 0)
+                                    match = v.get("match", False)
+                                    if match or score >= 0.25:
+                                        self._wt_msg += f"\n✅ Speaker: MATCH (score={score:.2f})"
+                                    else:
+                                        self._wt_msg += f"\n❌ Speaker: score={score:.2f} < {cfg.speaker_threshold}"
+                                else:
+                                    self._wt_msg += "\n⚠️ No enrollment — run 'Enroll Voice' first"
+                            else:
+                                self._wt_msg += "\n⚠️ Speaker verification disabled"
+
+                            self._wt_ok = True
+                            self._wt_done = True
+                            capture.stop()
+                            return
+
+                    # fuzzy check
+                    if not self._wt_done:
+                        for vosk_w, real_w in vosk_fuzzy.items():
+                            if vosk_w in clean:
+                                for ww in wt:
+                                    if re.sub(r'[^\w\s]', '', ww.lower()) == real_w:
+                                        elapsed = time.time() - start
+                                        self._wt_msg = f"⚠️ Fuzzy: \"{vosk_w}\" ≈ \"{ww}\" ({elapsed:.1f}s)"
+                                        self._wt_ok = True
+                                        self._wt_done = True
+                                        capture.stop()
+                                        return
+
+                    # update progress
+                    elapsed = time.time() - start
+                    self._wt_progress = min(elapsed / 15.0, 0.95)
+
+                self._wt_msg = "❌ No wake word detected in 15 seconds"
+                self._wt_done = True
+                capture.stop()
+            except Exception as e:
+                self._wt_msg = f"❌ Error: {e}"
+                self._wt_done = True
+
+        self._wt_progress = 0.0
+        self._wt_test_start = time.time()
+        import threading
+        threading.Thread(target=_run, daemon=True).start()
+        self._poll_wake_test()
+
+    def _poll_wake_test(self):
+        """Poll wake test progress."""
+        if not self._wt_done:
+            if self._wt_phase == 0:
+                self.wt_status.configure(text="⏳ Loading Vosk...")
+                self.wt_progress.set(0.05)
+            elif self._wt_phase == 1:
+                elapsed = time.time() - getattr(self, '_wt_test_start', time.time())
+                self.wt_progress.set(min(getattr(self, '_wt_progress', 0.0), 0.95))
+                self.wt_status.configure(text=f"🎤 Listening... {int(15 - elapsed)}s")
+            else:
+                self.wt_status.configure(text="⏳ Processing...")
+                self.wt_progress.set(0.97)
+            self.win.after(200, self._poll_wake_test)
+        else:
+            self.wt_progress.set(1.0)
+            self.wt_progress.pack_forget()
+            self.wt_status.configure(text="✅ Done" if self._wt_ok else "❌ Failed")
+            self.wt_result.configure(text=self._wt_msg)
 
     def _on_timeout_change(self, val):
         self.timeout_label.configure(text=f"{val:.1f}s")
