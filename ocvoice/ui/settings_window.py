@@ -364,6 +364,28 @@ class SettingsWindow:
         )
         self.en_voice_menu.pack(anchor="w", pady=(2, 10))
 
+        # ─── Help section ───
+        ctk.CTkLabel(scroll, text="💡 How to use / Как пользоваться",
+                      anchor="w", font=ctk.CTkFont(size=14, weight="bold")).pack(fill="x", pady=(15, 5))
+        help_text = (
+            "🎤 Say:  дарвин, [your message], отправь\n"
+            "🤖 Agents:  дарвин, план мод / билд мод\n"
+            "📁 Project:  дарвин, открой проект [name]\n"
+            "💬 Session:  дарвин, последняя сессия\n\n"
+            "⚙️ Settings via tray/menubar 🎤 icon\n"
+            "📋 CLI:  ocv status | ocv select project | ocv ptt\n\n"
+            "🎤 Say:  дарвин, [сообщение], отправь\n"
+            "🤖 Агент:  дарвин, план мод / билд мод\n"
+            "📁 Проект:  дарвин, открой проект [название]\n"
+            "💬 Сессия:  дарвин, последняя сессия\n"
+            "🔇 Стоп:  дарвин, стоп\n\n"
+            "Настройки: иконка 🎤 в меню → ⚙️ Settings\n"
+            "CLI: ocv status | ocv select project | ocv ptt"
+        )
+        ctk.CTkLabel(scroll, text=help_text, anchor="w",
+                      font=ctk.CTkFont(size=11), justify="left",
+                      text_color="#aaaaaa").pack(fill="x", pady=(0, 10))
+
         # Buttons
         btn_frame = ctk.CTkFrame(self.win, fg_color="transparent")
         btn_frame.pack(fill="x", padx=10, pady=(0, 10))

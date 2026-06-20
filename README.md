@@ -22,9 +22,13 @@
 - 📁 **Project-aware** — select projects from your OpenCode Desktop; sessions filter automatically
 - 🔍 **Fuzzy matching** — say project names in any language ("дипстрим" → DeepStream3, "mayak" → Maiak)
 - 💬 **Voice session switching** — "последняя сессия", "переключись на сессию...", "открой проект..."
-- ⚙️ **Settings GUI** — CustomTkinter window to edit wake words, send phrases, language, sensitivity
-- 🔵 **State indicators** — icon in menubar/tray changes: 🟢 ожидает → 🔵 команда → 🟣 ответ... → 🟢
+- 🤖 **Agent switching** — "план мод" / "билд мод" — switch between Plan and Build agents
+- 🎙 **Voice enrollment** — inline in Settings window with progress bar
+- ⚙️ **Settings GUI** — CustomTkinter window: wake words, send phrases, language, sensitivity, TTS voice
+- 🗣️ **Smart TTS** — skips code blocks, arrows, formatting — reads only natural text
+- 🔵 **State indicators** — icon in menubar/tray changes: 🟢 → 🔵 → 🟣 → 🟢
 - 🎤 **Live audio device switching** — change microphone in Settings, applies immediately
+- 🔒 **Singleton lock** — prevents multiple daemon instances
 - ⏱ 10s silence → auto-send; "отправь" → instant send
 - macOS / Windows / Linux
 
@@ -39,18 +43,18 @@ ocv enroll      # enroll your voice (10s)
 ocv start       # start the daemon
 ```
 
-Speak: **"окей код, write a sorting function, отправь"**
+Speak: **"дарвин, напиши функцию сортировки, отправь"**
 
 ### Voice Commands
 
 | Command / Команда | Action / Действие |
 |-------------------|-------------------|
-| "окей код, [message], отправь" | Send message to IDE |
-| "окей код, стоп" / "stop" | Pause listening |
-| "окей код, новая сессия" | Create new session |
-| "окей код, plan mode" / "build mode" | Switch agent |
-| "окей код, открой проект [name]" | Switch project (fuzzy match) |
-| "окей код, переключись на сессию [title]" | Switch session (fuzzy match) |
+| "дарвин, [message], отправь" | Send message to IDE |
+| "дарвин, стоп" / "stop" | Pause listening |
+| "дарвин, новая сессия" | Create new session |
+| "дарвин, план мод" / "билд мод" | Switch agent (Plan/Build) |
+| "дарвин, открой проект [name]" | Switch project (fuzzy match) |
+| "дарвин, последняя сессия" | Back to most recent session |
 | "окей код, последняя сессия" | Back to most recent session |
 | "окей код, найди сервер" / "find server" | Rediscover IDE server |
 | "окей код, список проектов" | List all projects |
@@ -58,22 +62,25 @@ Speak: **"окей код, write a sorting function, отправь"**
 ### Project & Session Selection
 
 ```
-"окей код, открой проект маяк"
+"дарвин, открой проект маяк"
   → fuzzy match "маяк" → "mayak" → Maiak
   → auto-selects most recent session for Maiak (by time_updated)
 
-"окей код, дипстрим, отправь"
+"дарвин, дипстрим, отправь"
   → translit "дипстрим" → "dipstrim" → DeepStream3
 
-"окей код, последняя сессия"
+"дарвин, последняя сессия"
   → releases manual lock
   → poller picks most recently updated session
 
-"окей код, переключись на сессию тест"
+"дарвин, переключись на сессию тест"
   → fuzzy match against session titles
+
+"дарвин, план мод, отправь"
+  → switches to Plan agent
 ```
 
-**Via menubar/tray:** Click 🎤 icon → 📁 Projects / 💬 Sessions
+**Via menubar/tray:** Click 🎤 icon → 📁 Projects / 💬 Sessions / 🤖 Agent
 **Via CLI:** `ocv select project` / `ocv select session`
 **Via settings:** Click ⚙️ Settings in menubar/tray → CustomTkinter GUI
 
@@ -152,9 +159,13 @@ voice_en = "en-US-JennyNeural"
 - 📁 **Проекты** — выбор проекта из OpenCode Desktop; сессии фильтруются автоматически
 - 🔍 **Fuzzy поиск** — называй проекты на любом языке ("дипстрим" → DeepStream3, "mayak" → Maiak)
 - 💬 **Голосовое переключение** — "последняя сессия", "переключись на сессию...", "открой проект..."
-- ⚙️ **Окно настроек** — CustomTkinter: wake words, send phrases, язык, чувствительность
+- 🤖 **Агенты** — "план мод" / "билд мод" — переключение Plan/Build
+- 🎙 **Запись голоса** — прямо в окне настроек с прогрессом
+- ⚙️ **Окно настроек** — CustomTkinter: wake words, send phrases, язык, TTS голос
+- 🗣️ **Умный TTS** — пропускает код и форматирование, читает только текст
 - 🔵 **Индикация** в меню-баре/трее: 🟢 → 🔵 → 🟣 → 🟢
 - 🎤 **Переключение девайса** — смени микрофон в настройках, работает без перезапуска
+- 🔒 **Один экземпляр** — защита от запуска двух демонов
 - ⏱ 10с тишины → авто-отправка; "отправь" → мгновенная отправка
 - macOS / Windows / Linux
 
@@ -169,21 +180,18 @@ ocv enroll      # записать голос (10с)
 ocv start       # запустить демон
 ```
 
-Говори: **"окей код, напиши функцию сортировки, отправь"**
+Говори: **"дарвин, напиши функцию сортировки, отправь"**
 
 ### Голосовые команды
 
 | Команда | Действие |
 |---------|----------|
-| "окей код, [сообщение], отправь" | Отправить сообщение в IDE |
-| "окей код, стоп" | Пауза прослушивания |
-| "окей код, новая сессия" | Создать новую сессию |
-| "окей код, plan mode" / "build mode" | Переключить агента |
-| "окей код, открой проект [название]" | Выбрать проект (fuzzy match) |
-| "окей код, переключись на сессию [название]" | Выбрать сессию (fuzzy match) |
-| "окей код, последняя сессия" | Вернуться к последней сессии |
-| "окей код, найди сервер" | Пересканировать серверы |
-| "окей код, список проектов" | Показать все проекты |
+| "дарвин, [сообщение], отправь" | Отправить сообщение в IDE |
+| "дарвин, стоп" | Пауза прослушивания |
+| "дарвин, новая сессия" | Создать новую сессию |
+| "дарвин, план мод" / "билд мод" | Переключить агента |
+| "дарвин, открой проект [название]" | Выбрать проект (fuzzy match) |
+| "дарвин, последняя сессия" | Вернуться к последней сессии |
 
 ### Выбор проектов и сессий
 

@@ -11,6 +11,7 @@ ocv stop           # Stop daemon
 ocv enroll         # Record voice print for speaker verification
 ocv select session # Pick session interactively
 ocv select project # Pick project interactively
+ocv ptt           # Push-to-talk (one command, no wake word)
 ```
 
 Speak commands in **Russian** or **English**.
@@ -19,33 +20,32 @@ Speak commands in **Russian** or **English**.
 
 | Command | Action |
 |---------|--------|
-| `"окей код, [message], отправь"` | Send message to IDE |
-| `"окей код, новая сессия"` | Create new session |
-| `"окей код, plan mode"` / `"build mode"` | Switch agent |
-| `"окей код, открой проект [name]"` | Switch project (fuzzy match) |
-| `"окей код, переключись на сессию [title]"` | Switch session |
-| `"окей код, последняя сессия"` | Back to most recent |
-| `"окей код, стоп"` | Pause listening |
-| `"окей код, найди сервер"` | Rediscover IDE |
+| `"дарвин, [message], отправь"` | Send message to IDE |
+| `"дарвин, новая сессия"` | Create new session |
+| `"дарвин, план мод"` / `"билд мод"` | Switch agent (Plan/Build) |
+| `"дарвин, открой проект [name]"` | Switch project (fuzzy match) |
+| `"дарвин, последняя сессия"` | Back to most recent |
+| `"дарвин, стоп"` | Pause listening |
+| `"дарвин, найди сервер"` | Rediscover IDE |
 
 ## Architecture
 
-- **Daemon** runs in background, auto-discovers IDE server
+- **Daemon** runs in background, auto-discovers IDE server, singleton lock
 - **Vosk** streams speech in real-time (Vosk model per language)
 - **faster-whisper** fallback for accuracy
 - **Speaker verification** (Resemblyzer/SpeechBrain) filters non-user voices
 - **Projects** read from `opencode.global.dat` + SQLite `project` table
 - **Sessions** filtered per project via SQLite JOIN (`session` + `project`)
 - **Fuzzy matching** (difflib) + Russian→Latin transliteration for names
-- **Messages** sent async to IDE via `/session/:id/prompt_async`
+- **Messages** sent sync via `/session/:id/message` (waits for AI response)
 - **Settings** stored in `~/.config/ocvoice/config.toml` (or GUI via CustomTkinter)
 
 ## UI
 
-- **macOS:** Menu bar (rumps) — 🎤 icon with project/session menus
+- **macOS:** Menu bar (rumps) — 🎤 icon with project/session/agent menus
 - **Linux/Windows:** System tray (pystray) — same functionality
 - **CLI:** `ocv select [session|project|status]` — interactive picker
-- **Settings:** CustomTkinter window — wake/send phrases, language, sensitivity, toggles
+- **Settings:** CustomTkinter window — wake/send phrases, language, sensitivity, TTS, enrollment
 
 ## State indicators
 
@@ -67,7 +67,7 @@ device_id = 1
 
 [voice]
 language = "ru"
-wake_words = ["окей код", "hey code"]
+wake_words = ["дарвин", "darwin"]
 send_phrases = ["отправь", "отправляй", "отправить", "send", "go", "done"]
 wake_sensitivity = 0.5
 silence_timeout = 0.8
@@ -78,6 +78,12 @@ threshold = 0.5
 
 [speech.stt]
 backend = "auto"
+
+[speech.tts]
+enabled = true
+read_code = false
+voice_ru = "ru-RU-SvetlanaNeural"
+voice_en = "en-US-JennyNeural"
 
 [ui]
 menubar = true
