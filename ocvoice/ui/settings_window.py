@@ -258,12 +258,31 @@ class SettingsWindow:
         )
         self.speaker_switch.pack(anchor="w", pady=(4, 5))
 
-        ctk.CTkButton(
-            scroll, text="🎙 Re-enroll Voice",
-            command=self._action_enroll,
+        # Enrollment inline UI
+        self.enroll_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        self.enroll_frame.pack(fill="x", pady=(0, 10))
+
+        self.enroll_btn = ctk.CTkButton(
+            self.enroll_frame, text="🎙 Enroll Voice",
+            command=self._start_enroll,
             fg_color="#555555", hover_color="#444444",
             height=32, font=ctk.CTkFont(size=12),
-        ).pack(anchor="w", pady=(0, 10))
+        )
+        self.enroll_btn.pack(anchor="w")
+
+        self.enroll_status = ctk.CTkLabel(
+            self.enroll_frame, text="",
+            anchor="w", font=ctk.CTkFont(size=12),
+            text_color="#888888",
+        )
+        self.enroll_progress = ctk.CTkProgressBar(
+            self.enroll_frame, width=300,
+        )
+        self.enroll_instruction = ctk.CTkLabel(
+            self.enroll_frame, text="",
+            anchor="w", font=ctk.CTkFont(size=11),
+            text_color="#aaaaaa", wraplength=400,
+        )
 
         # TTS toggle
         ctk.CTkLabel(scroll, text="💬 Text-to-Speech", anchor="w",
@@ -471,13 +490,57 @@ class SettingsWindow:
         _send_reload_ipc()
         self.win.destroy()
 
-    def _action_enroll(self):
-        """Close settings and launch voice enrollment."""
-        self.win.destroy()
-        import subprocess, sys
-        subprocess.Popen(
-            [sys.executable, "-m", "ocvoice", "enroll"],
-        )
+    def _start_enroll(self):
+        """Start voice enrollment inline with progress."""
+        self.enroll_btn.configure(state="disabled", text="🎤 Recording...")
+        self.enroll_progress.pack(anchor="w", pady=(2, 2), fill="x")
+        self.enroll_progress.set(0)
+        self.enroll_status.pack(anchor="w")
+        self.enroll_instruction.pack(anchor="w", pady=(2, 0))
+        self.enroll_instruction.configure(text='Прочитайте вслух:\n"Привет, это мой голос для управления OpenCode."')
+        self._enroll_start_time = time.time()
+        self._enroll_done = False
+
+        def _record():
+            import sounddevice as sd
+            import numpy as np
+            sr = 16000
+            duration = 8
+            audio = sd.rec(int(duration * sr), samplerate=sr, channels=1, dtype=np.float32, blocking=True)
+            audio = audio.flatten()
+            if len(audio) > 0:
+                from .speech.speaker import SpeakerVerifier
+                from .config import Config
+                cfg = Config()
+                verifier = SpeakerVerifier(cfg)
+                result = verifier.enroll_from_audio(audio, sr)
+                self._enroll_ok = True if result else False
+            self._enroll_done = True
+
+        self._enroll_ok = False
+        import threading
+        threading.Thread(target=_record, daemon=True).start()
+        self._poll_enroll()
+
+    def _poll_enroll(self):
+        """Poll enrollment progress and update UI."""
+        if not self._enroll_done:
+            elapsed = time.time() - self._enroll_start_time
+            pct = min(elapsed / 8.0, 0.95)
+            self.enroll_progress.set(pct)
+            remaining = max(0, 8 - int(elapsed))
+            self.enroll_status.configure(text=f"🎤 Запись... {remaining}с")
+            self.win.after(200, self._poll_enroll)
+        else:
+            self.enroll_progress.set(1.0)
+            if self._enroll_ok:
+                self.enroll_status.configure(text="✅ Голос сохранён!")
+                self.enroll_instruction.configure(text="")
+                self.enroll_btn.configure(state="normal", text="🎙 Enroll Again")
+            else:
+                self.enroll_status.configure(text="❌ Ошибка записи")
+                self.enroll_instruction.configure(text="Проверьте микрофон и попробуйте снова")
+                self.enroll_btn.configure(state="normal", text="🎙 Try Again")
 
     def _cancel(self):
         self.win.destroy()

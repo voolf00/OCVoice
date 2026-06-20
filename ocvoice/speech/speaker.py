@@ -131,6 +131,34 @@ class SpeakerVerifier:
         print(f"{'='*50}\n")
         return True
 
+    def enroll_from_audio(self, audio: np.ndarray, sample_rate: int, name: str = "default") -> bool:
+        """Enroll a speaker from already-recorded audio.
+
+        Args:
+            audio: float32 numpy array of audio samples.
+            sample_rate: Sample rate of audio.
+            name: Speaker name.
+
+        Returns:
+            True on success.
+        """
+        self._load_model()
+        if self._backend == "none":
+            return False
+        if len(audio) == 0:
+            return False
+        # Resample if needed
+        if sample_rate != self.sample_rate:
+            from scipy import signal
+            ratio = self.sample_rate / sample_rate
+            new_len = int(len(audio) * ratio)
+            audio = signal.resample(audio, new_len)
+        embedding = self._create_embedding(audio)
+        if embedding is None:
+            return False
+        self._save_embedding(name, embedding)
+        return True
+
     def verify(self, audio: np.ndarray, name: str = "default") -> dict:
         """Verify that audio matches the enrolled speaker.
 
