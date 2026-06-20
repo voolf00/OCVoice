@@ -386,6 +386,7 @@ class VoiceDaemon:
         self._set_state("waiting")
 
         # Start audio in background thread
+        self._start_time = time.time()
         audio_thread = threading.Thread(target=self._audio_loop, daemon=True)
         audio_thread.start()
 
@@ -577,7 +578,7 @@ class VoiceDaemon:
                 if self.speaker and self.config.speaker_enabled:
                     v = self.speaker.verify(verify_audio)
                     score = v.get("score", 0)
-                    in_grace = time.time() - self._start_time < 15
+                    in_grace = time.time() - self._start_time < 30
                     if score < 0.1:
                         print(f"[OCVoice] 🔍 Wake '{wake_match}' score={score:.2f} — skip verify (model issue)", flush=True)
                     elif not v.get("match", False):
