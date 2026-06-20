@@ -42,6 +42,7 @@ class VoiceDaemon:
         self.config = config
         self._running = False
         self._listening = True  # Can be toggled by voice commands
+        self._start_time = time.time()
 
         # Components (initialized in setup)
         self.capture: Optional[AudioCapture] = None
@@ -576,11 +577,15 @@ class VoiceDaemon:
                 if self.speaker and self.config.speaker_enabled:
                     v = self.speaker.verify(verify_audio)
                     score = v.get("score", 0)
-                    if score < 0.1:  # Sanity check: score < 0.1 → модель не работает
+                    in_grace = time.time() - self._start_time < 15
+                    if score < 0.1:
                         print(f"[OCVoice] 🔍 Wake '{wake_match}' score={score:.2f} — skip verify (model issue)", flush=True)
                     elif not v.get("match", False):
-                        print(f"[OCVoice] 🔍 Wake '{wake_match}' voice mismatch ({v.get('score',0):.2f}) — ignored", flush=True)
-                        return
+                        if in_grace and score >= 0.25:
+                            print(f"[OCVoice] 🔍 Wake '{wake_match}' grace={score:.2f} — accepted (startup)", flush=True)
+                        else:
+                            print(f"[OCVoice] 🔍 Wake '{wake_match}' voice mismatch ({score:.2f}) — ignored", flush=True)
+                            return
                 # ✅ Wake word + speaker verified
                 self._beep(1000, 0.2)
                 if self._vosk:
@@ -920,7 +925,7 @@ class VoiceDaemon:
         # ✅ BEEP #2: end phrase confirmed
         time.sleep(0.3)
         self._beep(1200, 0.08)
-        self._set_state("sending")
+        self._set_state("awaiting")
         
         if self.speaker and self.config.speaker_enabled:
             if self.speaker.is_enrolled():
