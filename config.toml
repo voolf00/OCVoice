@@ -15,7 +15,7 @@ chunk_size = 1024
 # Listening mode: "wake_word" | "always_on" | "push_to_talk"
 mode = "wake_word"
 # Wake words that activate listening (used when mode = "wake_word")
-wake_words = ["окей код", "hey code"]
+wake_words = ["дарвин", "darwin"]
 # Wake word detection sensitivity (0.0 = less false positives, 1.0 = more sensitive)
 wake_sensitivity = 0.5
 # Seconds of silence before considering speech ended

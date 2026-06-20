@@ -32,7 +32,7 @@ chunk_size = 1024
 
 [voice]
 mode = "wake_word"
-wake_words = ["окей код", "hey code"]
+wake_words = ["дарвин", "darwin"]
 wake_sensitivity = 0.5
 silence_timeout = 2.0
 max_duration = 10.0
@@ -228,7 +228,7 @@ class Config:
     def voice_mode(self) -> str: return self.get("voice", "mode", default="wake_word")
 
     @property
-    def wake_words(self) -> list: return self.get("voice", "wake_words", default=["окей код", "hey code"])
+    def wake_words(self) -> list: return self.get("voice", "wake_words", default=["дарвин", "darwin"])
 
     @property
     def wake_sensitivity(self) -> float: return self.get("voice", "wake_sensitivity", default=0.5)

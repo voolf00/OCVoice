@@ -107,8 +107,11 @@ class RegexIntentParser:
         wake_phrases = list(self._wake_words)
         for w in self._wake_words:
             wl = w.lower()
-            # Add English/Russian variant for common patterns
-            if wl == "окей код":
+            if wl == "дарвин":
+                wake_phrases.extend(["дарвин", "darwin", "darvin", "darvine", "dарвин"])
+            elif wl == "darwin":
+                wake_phrases.extend(["darwin", "дарвин", "darvin", "darvine"])
+            elif wl == "окей код":
                 wake_phrases.extend(["окей code", "okay code", "эй код", "хей код", "окей", "okay"])
             elif wl == "hey code":
                 wake_phrases.extend(["hey code", "эй код", "хей код"])
