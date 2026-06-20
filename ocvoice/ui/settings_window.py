@@ -292,6 +292,52 @@ class SettingsWindow:
         self.tts_len_label = ctk.CTkLabel(len_frame, text="500", width=40)
         self.tts_len_label.pack(side="right", padx=(10, 0))
 
+        # TTS: Russian voice
+        ctk.CTkLabel(scroll, text="Russian voice", anchor="w",
+                      font=ctk.CTkFont(size=12)).pack(fill="x", pady=(5, 0))
+        ru_voices = [
+            "ru-RU-SvetlanaNeural — Female",
+            "ru-RU-DmitryNeural — Male",
+        ]
+        self.ru_voice_var = ctk.StringVar(value=ru_voices[0])
+        self.ru_voice_menu = ctk.CTkOptionMenu(
+            scroll, values=ru_voices, variable=self.ru_voice_var,
+            width=350, font=ctk.CTkFont(size=12),
+        )
+        self.ru_voice_menu.pack(anchor="w", pady=(2, 5))
+
+        # TTS: English voice
+        ctk.CTkLabel(scroll, text="English voice", anchor="w",
+                      font=ctk.CTkFont(size=12)).pack(fill="x", pady=(5, 0))
+        en_voices = [
+            "en-US-JennyNeural — Female (US)",
+            "en-US-AriaNeural — Female (US)",
+            "en-US-EmmaNeural — Female (US)",
+            "en-US-AvaNeural — Female (US)",
+            "en-US-MichelleNeural — Female (US)",
+            "en-US-AnaNeural — Female (US)",
+            "en-US-AndrewNeural — Male (US)",
+            "en-US-BrianNeural — Male (US)",
+            "en-US-EricNeural — Male (US)",
+            "en-US-GuyNeural — Male (US)",
+            "en-US-ChristopherNeural — Male (US)",
+            "en-US-RogerNeural — Male (US)",
+            "en-US-SteffanNeural — Male (US)",
+            "en-GB-LibbyNeural — Female (UK)",
+            "en-GB-MaisieNeural — Female (UK)",
+            "en-GB-SoniaNeural — Female (UK)",
+            "en-GB-RyanNeural — Male (UK)",
+            "en-GB-ThomasNeural — Male (UK)",
+            "en-AU-NatashaNeural — Female (AU)",
+            "en-AU-WilliamMultilingualNeural — Male (AU)",
+        ]
+        self.en_voice_var = ctk.StringVar(value=en_voices[0])
+        self.en_voice_menu = ctk.CTkOptionMenu(
+            scroll, values=en_voices, variable=self.en_voice_var,
+            width=350, font=ctk.CTkFont(size=12),
+        )
+        self.en_voice_menu.pack(anchor="w", pady=(2, 10))
+
         # Buttons
         btn_frame = ctk.CTkFrame(self.win, fg_color="transparent")
         btn_frame.pack(fill="x", padx=10, pady=(0, 10))
@@ -375,6 +421,18 @@ class SettingsWindow:
         self.tts_len_slider.set(tts_max)
         self.tts_len_label.configure(text=str(tts_max))
 
+        # Voices
+        current_ru = self.cfg.get("speech", {}).get("tts", {}).get("voice_ru", "ru-RU-SvetlanaNeural")
+        for v in self.ru_voice_menu.cget("values"):
+            if v.startswith(current_ru):
+                self.ru_voice_var.set(v)
+                break
+        current_en = self.cfg.get("speech", {}).get("tts", {}).get("voice_en", "en-US-JennyNeural")
+        for v in self.en_voice_menu.cget("values"):
+            if v.startswith(current_en):
+                self.en_voice_var.set(v)
+                break
+
     def _save(self):
         voice = self.cfg.setdefault("voice", {})
         voice["wake_words"] = [w.strip() for w in self.wake_entry.get().split(",") if w.strip()]
@@ -399,6 +457,8 @@ class SettingsWindow:
         tt["enabled"] = self.tts_var.get()
         tt["read_code"] = self.tts_code_var.get()
         tt["max_length"] = int(self.tts_len_slider.get())
+        tt["voice_ru"] = self.ru_voice_var.get().split(" —")[0]
+        tt["voice_en"] = self.en_voice_var.get().split(" —")[0]
 
         _save_config(self.cfg)
         _send_reload_ipc()
