@@ -101,6 +101,10 @@ class VoiceDaemon:
         else:
             print(f"[OCVoice] ⚠️ {msg}", file=sys.stderr, flush=True)
 
+    # ─── State Machine ───────────────────────────────────────────────
+    # Manages 🟢 ожидает → 🔵 команда → 🟣 ответ... → 🟢 cycle.
+    # Updates: session title in OpenCode, dock badge, state file, menubar icon.
+
     def _set_state(self, state: str):
         """Update all state indicators: session title, dock badge, state file.
 
