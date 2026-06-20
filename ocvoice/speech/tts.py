@@ -292,40 +292,69 @@ class TextToSpeech:
         return text.strip()
 
     def _play_audio(self, audio: bytes):
-        """Play WAV audio bytes."""
+        """Play audio bytes (MP3 from Edge TTS)."""
+        import tempfile
+        import os
+        tmp_path = None
         try:
-            # Write to temp file and play
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            # Save as proper MP3 (Edge TTS returns MP3)
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
                 f.write(audio)
                 tmp_path = f.name
-
             self._play_file(tmp_path)
-            os.unlink(tmp_path)
         except Exception as e:
             print(f"[OCVoice] Audio playback error: {e}")
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
 
     @staticmethod
     def _play_file(path: str):
         """Play an audio file using the best available method."""
-        # Try sounddevice first
-        try:
-            import soundfile as sf
-            import sounddevice as sd
-            data, sr = sf.read(path)
-            sd.play(data, sr)
-            sd.wait()
-            return
-        except ImportError:
-            pass
-
-        # Platform-specific fallbacks
         import platform
         system = platform.system()
 
         if system == "Darwin":
-            os.system(f"afplay '{path}' &")
+            # macOS: afplay handles MP3 natively, block until done
+            import subprocess
+            subprocess.run(["afplay", path], check=False)
+            return
+
+        # Linux/Windows: try sounddevice (convert to WAV first)
+        try:
+            import subprocess
+            import tempfile
+            import os
+            wav_path = None
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                    wav_path = f.name
+                subprocess.run(["ffmpeg", "-y", "-i", path, wav_path],
+                             capture_output=True, check=False)
+                if wav_path and os.path.exists(wav_path):
+                    import soundfile as sf
+                    import sounddevice as sd
+                    data, sr = sf.read(wav_path)
+                    sd.play(data, sr)
+                    sd.wait()
+            finally:
+                if wav_path and os.path.exists(wav_path):
+                    os.unlink(wav_path)
+            return
+        except Exception:
+            pass
+
+        # Fallback: platform-specific
+        if system == "Darwin":
+            os.system(f"afplay '{path}'")
         elif system == "Linux":
-            os.system(f"aplay '{path}' &" if os.path.exists("/usr/bin/aplay") else f"paplay '{path}' &")
+            if os.path.exists("/usr/bin/aplay"):
+                os.system(f"aplay '{path}'")
+            else:
+                os.system(f"paplay '{path}'")
         elif system == "Windows":
             import winsound
             winsound.PlaySound(path, winsound.SND_FILENAME)
