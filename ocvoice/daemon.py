@@ -2018,7 +2018,7 @@ class VoiceDaemon:
         name = worktree.rsplit('/', 1)[-1]
         print(f"[OCVoice] 📁 Выбран проект: {name}", flush=True)
         self._selected_project_worktree = worktree
-        self._manual_session_until = time.time() + 30
+        self._manual_session_until = float('inf')
 
         # Pick the most recent session for this project from DB
         sessions = self._read_opencode_db_sessions(worktree)
