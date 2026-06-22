@@ -2115,17 +2115,26 @@ class VoiceDaemon:
 
     @staticmethod
     def _acquire_daemon_lock() -> bool:
-        """Check if another daemon is running. Write PID file if not."""
+        """Ensure only one daemon runs. Auto-kill stale or old instances."""
         pid_file = VoiceDaemon.DAEMON_PID
         if pid_file.exists():
             try:
                 pid = int(pid_file.read_text().strip())
                 os.kill(pid, 0)  # Check if process exists
-                print(f"[OCVoice] ❌ Демон уже запущен (PID {pid})")
-                print("   Запусти 'ocv stop' чтобы остановить")
-                return False
+                print(f"[OCVoice] 🔄 Останавливаю старый демон (PID {pid})...")
+                import signal
+                os.kill(pid, signal.SIGTERM)
+                # Wait for it to die
+                for _ in range(50):  # up to 5 seconds
+                    try:
+                        os.kill(pid, 0)
+                        time.sleep(0.1)
+                    except ProcessLookupError:
+                        break
+                pid_file.unlink(missing_ok=True)
+                print(f"[OCVoice] ✅ Старый демон остановлен")
             except (ProcessLookupError, ValueError, OSError):
-                # Stale PID
+                # Stale PID — just clean up
                 pid_file.unlink(missing_ok=True)
         pid_file.parent.mkdir(parents=True, exist_ok=True)
         pid_file.write_text(str(os.getpid()))
