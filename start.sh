@@ -35,7 +35,7 @@ if kill -0 $DAEMON_PID 2>/dev/null; then
     echo ""
     grep -E "(Found|Wake|Audio|Daemon running)" /tmp/ocvoice-daemon.log 2>/dev/null | tail -5
     echo ""
-    echo "Говори громко: 'окей код, спроси привет'"
+    echo "Говори громко: 'дарвин, напиши функцию, отправь'"
     echo ""
     echo "Смотри логи:       tail -f /tmp/ocvoice-daemon.log"
     echo "Остановить:        pkill -f 'ocvoice.*start'"
