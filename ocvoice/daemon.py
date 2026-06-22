@@ -1450,14 +1450,17 @@ class VoiceDaemon:
 
         # Mark current — find which project matches the selected one
         selected = self._selected_project_worktree
+        display_project = self._extract_project_name(current_project)
         for p in all_projects:
             p['current'] = bool(p.get('worktree')) and p['worktree'] == selected
+            if selected and p.get('worktree') == selected:
+                display_project = p.get('name', '') or selected.rsplit('/', 1)[-1]
 
         kwargs = dict(
             sessions=sessions,
             projects=projects,
             current_session_id=self.client.session_id or "",
-            current_project_name=self._extract_project_name(current_project),
+            current_project_name=display_project,
             server_url=str(self.client.client.base_url) if self.client else "",
             all_projects=all_projects,
             language=self._language,
@@ -2016,20 +2019,32 @@ class VoiceDaemon:
         if not worktree:
             return
         name = worktree.rsplit('/', 1)[-1]
-        print(f"[OCVoice] 📁 Выбран проект: {name}", flush=True)
+        print(f"[OCVoice] 📁 Выбран проект: {name} ({worktree})", flush=True)
         self._selected_project_worktree = worktree
         self._manual_session_until = float('inf')
+
+        if not self.client:
+            print(f"  ❌ Нет соединения с OpenCode", flush=True)
+            self._update_ui_menu()
+            return
 
         # Pick the most recent session for this project from DB
         sessions = self._read_opencode_db_sessions(worktree)
         if sessions:
             latest = max(sessions, key=lambda s: s.get('time', {}).get('updated', 0))
-            if self.client:
-                session_id = latest['id']
-                self.client.session_id = session_id
-                print(f"  📋 Сессия: {latest.get('title', 'untitled')[:40]} ({session_id[:20]}...)", flush=True)
+            session_id = latest['id']
+            self.client.session_id = session_id
+            print(f"  📋 Сессия: {latest.get('title', 'untitled')[:40]} ({session_id[:20]}...)", flush=True)
         else:
-            print(f"  ⚠️ Нет сессий для проекта {name}", flush=True)
+            # Fallback: create a new session for this project
+            print(f"  ⚠️ Нет сессий для {name}, создаю новую...", flush=True)
+            try:
+                s = self.client.create_session(f"🎤 {name}")
+                if s and s.get('id'):
+                    self.client.session_id = s['id']
+                    print(f"  📋 Создана новая сессия ({s['id'][:20]}...)", flush=True)
+            except Exception as e:
+                print(f"  ❌ Не удалось создать сессию: {e}", flush=True)
 
         self._set_state("waiting")
         self._update_ui_menu()
