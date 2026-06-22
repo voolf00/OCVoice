@@ -2124,13 +2124,20 @@ class VoiceDaemon:
                 print(f"[OCVoice] 🔄 Останавливаю старый демон (PID {pid})...")
                 import signal
                 os.kill(pid, signal.SIGTERM)
-                # Wait for it to die
-                for _ in range(50):  # up to 5 seconds
+                # Wait for it to die (up to 5s)
+                for _ in range(50):
                     try:
                         os.kill(pid, 0)
                         time.sleep(0.1)
                     except ProcessLookupError:
                         break
+                else:
+                    # Timeout — force kill
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                        time.sleep(0.2)
+                    except ProcessLookupError:
+                        pass
                 pid_file.unlink(missing_ok=True)
                 print(f"[OCVoice] ✅ Старый демон остановлен")
             except (ProcessLookupError, ValueError, OSError):

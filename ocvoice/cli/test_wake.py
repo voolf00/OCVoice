@@ -20,6 +20,7 @@ def test_wake():
 
     cfg = Config()
     wake_words = cfg.wake_words
+    daemon_pid = os.path.expanduser("~/.config/ocvoice/daemon.pid")
 
     print(f"\n{'='*50}")
     print("🧪  Test Wake Word + Speaker Verification")
@@ -28,6 +29,29 @@ def test_wake():
     print(f"Wake words: {', '.join(wake_words)}")
     print(f"Language: {cfg.language}")
     print(f"Speaker enabled: {cfg.speaker_enabled}")
+    print(f"Speaker threshold: {cfg.speaker_threshold}")
+
+    # Check if daemon is already running
+    if os.path.exists(daemon_pid):
+        try:
+            with open(daemon_pid) as f:
+                pid = int(f.read().strip())
+            os.kill(pid, 0)
+            print(f"\n⚠️  Daemon is RUNNING (PID {pid})")
+            print("   This test may conflict with the daemon.")
+            print("   Stop it first: ocv stop")
+            print("   Or just say 'дарвин' to the running daemon.\n")
+        except (ProcessLookupError, ValueError, OSError):
+            pass
+
+    # Check Vosk model
+    vosk_cache = os.path.expanduser(f"~/.cache/ocvoice/vosk")
+    lang_model = f"vosk-model-small-{cfg.language}"
+    model_path = os.path.join(vosk_cache, lang_model)
+    if os.path.exists(os.path.join(model_path, "am")):
+        print(f"  ✓ Vosk model cached: {lang_model}")
+    else:
+        print(f"  ⚠️  Vosk model NOT cached — will download on first test")
     print(f"Speaker threshold: {cfg.speaker_threshold}")
 
     if not cfg.speaker_enabled:

@@ -92,6 +92,15 @@ def _cmd_autostart(config: Config, action: str):
 
 def main():
     """Main entry point for OCVoice CLI."""
+    # Python version check
+    if sys.version_info < (3, 10):
+        print(f"[OCVoice] ❌ Python 3.10+ required (you have {sys.version_info.major}.{sys.version_info.minor})")
+        print("   Install Python 3.10+ and reinstall OCVoice:")
+        print("   brew install python@3.12")
+        print("   rm -rf ~/.local/share/ocvoice/venv")
+        print("   ./install.sh")
+        sys.exit(1)
+
     if len(sys.argv) < 2:
         print("OCVoice — Voice control for OpenCode")
         print("Version: 0.1.0")
