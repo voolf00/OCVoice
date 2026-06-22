@@ -41,7 +41,7 @@ fi
 # Activate and install
 echo -e "\n${YELLOW}[*] Installing dependencies...${NC}"
 "$VENV_DIR/bin/pip" install --upgrade pip -q
-"$VENV_DIR/bin/pip" install -e "$(dirname "$0")/.." -q
+"$VENV_DIR/bin/pip" install -e "$(dirname "$0")" -q
 
 echo -e "${GREEN}[✓]${NC} Dependencies installed"
 
