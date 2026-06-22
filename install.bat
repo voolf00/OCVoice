@@ -163,10 +163,9 @@ echo   ocv select session   Pick a session
 echo   Settings via ⚙️ in menu bar
 echo.
 echo Voice commands:
-echo   "окей код, напиши функцию, отправь"
-echo   "окей код, открой проект [name]"
-echo   "окей код, переключись на сессию [title]"
-echo   "окей код, последняя сессия"
-echo   "okey kod, send, otprav"
+echo   "дарвин, напиши функцию, отправь"
+echo   "дарвин, открой проект [name]"
+echo   "дарвин, переключись на сессию [title]"
+echo   "дарвин, последняя сессия"
 echo.
 pause

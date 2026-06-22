@@ -279,7 +279,7 @@ class VoiceDaemon:
                     sample_rate=self.config.audio_sample_rate,
                     sensitivity=self.config.wake_sensitivity,
                 )
-                print("[OCVoice] Wake word: energy-based (STT verifies wake word)")
+                print(f"[OCVoice] Wake word: energy-based, words: {', '.join(self.config.wake_words)}")
 
         # ── Speech-to-Text ──
         try:
@@ -300,7 +300,7 @@ class VoiceDaemon:
         try:
             from .speech.vosk_stt import VoskSTT
             self._vosk = VoskSTT(lang=self._language)
-            print(f"[OCVoice] Vosk STT ready (lang=ru)")
+            print(f"[OCVoice] Vosk STT ready (lang={self._language})")
         except Exception as e:
             print(f"[OCVoice] Vosk init error: {e}")
             self._vosk = None
