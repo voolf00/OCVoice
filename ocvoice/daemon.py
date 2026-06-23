@@ -389,6 +389,7 @@ class VoiceDaemon:
         signal.signal(signal.SIGTERM, self._signal_handler)
 
         self._running = True
+        self._listening = True  # Ensure fresh start, ignore stale state
         self._init_state_session()
         self._select_user_session()
         self._set_state("waiting")
