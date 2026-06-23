@@ -138,6 +138,10 @@ def main():
         case "stop":
             from .daemon import VoiceDaemon
             VoiceDaemon.stop()
+            # Fallback: force kill any remaining ocvoice processes
+            import subprocess
+            subprocess.run(["pkill", "-9", "-f", "ocvoice.*start"], capture_output=True)
+            subprocess.run(["pkill", "-9", "-f", "python.*ocvoice"], capture_output=True)
         case "config":
             import json
             print(json.dumps(config._data, indent=2, default=str, ensure_ascii=False))

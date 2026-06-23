@@ -407,44 +407,42 @@ class VoiceDaemon:
         self._run_menu_bar()
 
     def _audio_loop(self):
-        """Audio capture loop — runs in background thread, auto-recovers."""
+        """Audio capture loop — runs in background thread, auto-recovers indefinitely."""
         print("[OCVoice] Daemon running. Speak your commands.")
         if self.config.voice_mode == "wake_word":
             print(f"[OCVoice] Wake words: {', '.join(self.config.wake_words)}")
 
-        retry_count = 0
-        max_retries = 5
-
-        while self._running and retry_count < max_retries:
+        while self._running:
             try:
-                self.capture.stop()
-            except Exception:
-                pass
-            self.capture = AudioCapture(
-                sample_rate=self.config.audio_sample_rate,
-                channels=self.config.audio_channels,
-                device_id=self.config.audio_device,
-                chunk_size=self.config.audio_chunk_size,
-            )
-            try:
-                self.capture.start()
-                self._main_loop()
-            except Exception as e:
-                retry_count += 1
-                import traceback
-                print(f"[OCVoice] Audio loop error (#{retry_count}): {e}", file=sys.stderr)
-                traceback.print_exc(file=sys.stderr)
-                print(f"[OCVoice] Restarting audio capture in 3s...", file=sys.stderr)
                 try:
                     self.capture.stop()
                 except Exception:
                     pass
-                time.sleep(3)
+                self.capture = AudioCapture(
+                    sample_rate=self.config.audio_sample_rate,
+                    channels=self.config.audio_channels,
+                    device_id=self.config.audio_device,
+                    chunk_size=self.config.audio_chunk_size,
+                )
+                self.capture.start()
+                self._main_loop()
+            except Exception as e:
+                import traceback
+                print(f"[OCVoice] Audio loop error: {e}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+                # Log crash to file for diagnosis
+                try:
+                    with open("/tmp/ocvoice-crash.log", "a") as f:
+                        f.write(f"\n=== Crash at {time.ctime()} ===\n")
+                        traceback.print_exc(file=f)
+                        f.write(f"State: {self._state}, listing={self._listening}\n")
+                except Exception:
+                    pass
+                if self._running:
+                    print("[OCVoice] Restarting audio capture in 3s...", file=sys.stderr)
+                    time.sleep(3)
 
-        if retry_count >= max_retries:
-            print("[OCVoice] Too many audio errors — daemon stopping", file=sys.stderr)
-        else:
-            print("[OCVoice] Audio loop ended", file=sys.stderr)
+        print("[OCVoice] Audio loop ended", file=sys.stderr)
 
     def _run_menu_bar(self):
         """Run the menu bar on the main thread (macOS requirement)."""
@@ -471,6 +469,11 @@ class VoiceDaemon:
 
         while self._running:
             try:
+                # Check if capture is alive — if not, break for recovery
+                if not getattr(self, 'capture', None):
+                    print("[OCVoice] Audio capture lost — restarting...", file=sys.stderr)
+                    break
+
                 # Read audio chunk
                 chunk = self.capture.read(chunk_size, timeout=0.1)
                 if len(chunk) == 0:
@@ -1874,6 +1877,7 @@ class VoiceDaemon:
         """Handle shutdown signals."""
         print("\n[OCVoice] Shutting down...")
         self._running = False
+        self._release_daemon_lock()
 
     def shutdown(self):
         """Clean shutdown of all components."""
@@ -2121,11 +2125,9 @@ class VoiceDaemon:
         if pid_file.exists():
             try:
                 pid = int(pid_file.read_text().strip())
-                os.kill(pid, 0)  # Check if process exists
+                os.kill(pid, 0)
                 print(f"[OCVoice] 🔄 Останавливаю старый демон (PID {pid})...")
-                import signal
                 os.kill(pid, signal.SIGTERM)
-                # Wait for it to die (up to 5s)
                 for _ in range(50):
                     try:
                         os.kill(pid, 0)
@@ -2133,7 +2135,7 @@ class VoiceDaemon:
                     except ProcessLookupError:
                         break
                 else:
-                    # Timeout — force kill
+                    print(f"[OCVoice] SIGTERM timeout, sending SIGKILL...")
                     try:
                         os.kill(pid, signal.SIGKILL)
                         time.sleep(0.2)
@@ -2142,10 +2144,13 @@ class VoiceDaemon:
                 pid_file.unlink(missing_ok=True)
                 print(f"[OCVoice] ✅ Старый демон остановлен")
             except (ProcessLookupError, ValueError, OSError):
-                # Stale PID — just clean up
                 pid_file.unlink(missing_ok=True)
-        pid_file.parent.mkdir(parents=True, exist_ok=True)
-        pid_file.write_text(str(os.getpid()))
+        try:
+            pid_file.parent.mkdir(parents=True, exist_ok=True)
+            pid_file.write_text(str(os.getpid()))
+        except Exception as e:
+            print(f"[OCVoice] ❌ Не удалось записать PID: {e}")
+            return False
         return True
 
     @staticmethod
@@ -2191,20 +2196,28 @@ class VoiceDaemon:
 
     @staticmethod
     def stop():
-        """Stop a running daemon."""
+        """Stop a running daemon. SIGKILL if SIGTERM fails after 3s."""
         pid_file = VoiceDaemon.DAEMON_PID
-        if pid_file.exists():
-            try:
-                pid = int(pid_file.read_text().strip())
-                import signal
-                if sys.platform == "win32":
-                    os.kill(pid, signal.SIGTERM)
-                else:
-                    os.kill(pid, signal.SIGTERM)
-                print(f"[OCVoice] Sent stop signal to PID {pid}")
-            except (ProcessLookupError, ValueError):
-                print("[OCVoice] Daemon not running. Cleaning up.")
-            finally:
-                pid_file.unlink(missing_ok=True)
-        else:
+        if not pid_file.exists():
             print("[OCVoice] No daemon PID file found.")
+            return
+        try:
+            pid = int(pid_file.read_text().strip())
+            import signal
+            print(f"[OCVoice] Останавливаю демон (PID {pid})...")
+            os.kill(pid, signal.SIGTERM)
+            for _ in range(30):
+                try:
+                    os.kill(pid, 0)
+                    time.sleep(0.1)
+                except ProcessLookupError:
+                    break
+            else:
+                print(f"[OCVoice] SIGTERM не сработал, применяю SIGKILL...")
+                os.kill(pid, signal.SIGKILL)
+                time.sleep(0.2)
+            print(f"[OCVoice] Демон остановлен")
+        except (ProcessLookupError, ValueError):
+            print("[OCVoice] Daemon not running. Cleaning up.")
+        finally:
+            pid_file.unlink(missing_ok=True)
