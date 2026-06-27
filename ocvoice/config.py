@@ -1,9 +1,10 @@
 """Configuration management for OCVoice.
 
-Loads config from multiple locations with precedence:
-1. Default config (bundled with package)
-2. ~/.config/ocvoice/config.toml (user overrides)
-3. Environment variables (OCVOICE_*)
+@contract: Loads config with strict precedence: defaults → bundled → user → env vars
+@desc: Loads config from multiple locations with precedence (defaults, bundled,
+       ~/.config/ocvoice/config.toml, and OCVOICE_* environment variables).
+       Provides attribute-style access and persistent save capability.
+@tags: config, toml, settings, environment
 """
 
 import os
@@ -145,7 +146,13 @@ def _env_overrides(config: dict) -> dict:
 # Config with file/env/CLI overrides + save
 
 class Config:
-    """OCVoice configuration with attribute-style access."""
+    """OCVoice configuration with attribute-style access.
+
+    @contract: Provides consistent, typed config access with save support
+    @desc: Attribute-style config access over a merged dict. Supports get/set
+           by key path, env var overrides, persistent TOML save.
+    @tags: config, settings, toml
+    """
 
     def __init__(self, config_path: str | None = None):
         self._data = self._load(config_path)
@@ -171,7 +178,14 @@ class Config:
         return data
 
     def get(self, *keys: str, default=None):
-        """Get a nested config value by key path."""
+        """Get a nested config value by key path.
+
+        @contract: Returns value or default without raising
+        @param keys: Variable-length key path (e.g. 'speech', 'stt', 'backend')
+        @param default: Fallback value if any key is missing
+        @returns: Config value or default
+        @tags: config, settings
+        """
         d = self._data
         for key in keys:
             if isinstance(d, dict):
@@ -183,7 +197,13 @@ class Config:
         return d
 
     def set(self, *keys, value):
-        """Set a nested config value and save to user config file."""
+        """Set a nested config value and save to user config file.
+
+        @contract: Mutates config and persists to ~/.config/ocvoice/config.toml
+        @param keys: Variable-length key path
+        @param value: Value to set at the leaf key
+        @tags: config, settings
+        """
         d = self._data
         for key in keys[:-1]:
             if key not in d or not isinstance(d[key], dict):
@@ -193,7 +213,11 @@ class Config:
         self._save()
 
     def _save(self):
-        """Write current config to user config file."""
+        """Write current config to user config file.
+
+        @contract: Creates parent dirs if needed; writes TOML-formatted text
+        @tags: config, settings, toml
+        """
         USER_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         lines = []
         for section, values in self._data.items():

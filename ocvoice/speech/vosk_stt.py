@@ -1,7 +1,11 @@
 """Streaming Speech-to-Text using Vosk.
 
-Real-time transcription with word-by-word output.
-Vosk runs locally, no internet needed.
+@contract: Provides real-time partial+final transcription from audio chunks
+@desc: Real-time streaming STT using Vosk engine. Runs fully locally with no
+       internet. Supports 30+ languages. Auto-downloads models on first use
+       per language. Provides partial (mid-utterance) and final (per-utterance)
+       transcription results.
+@tags: speech, stt, vosk, streaming, local
 """
 
 import json
@@ -121,7 +125,16 @@ LANGUAGE_ORDER = ["ru", "cn", "en"] + sorted(
 # Streaming STT — each chunk → partial text in real-time
 
 class VoskSTT:
-    """Streaming speech recognition using Vosk."""
+    """Streaming speech recognition using Vosk.
+
+    @contract: Processes audio chunks → returns partial text in real-time
+    @desc: Each audio chunk is fed to Vosk KaldiRecognizer. Partial results
+           are returned immediately; finalized utterances are queued for
+           batched retrieval via get_final_since_last_check().
+    @tags: speech, stt, vosk, streaming
+    @bug: Small model has limited accuracy on accented speech; fuzzy matching
+          in daemon compensates for common misrecognitions
+    """
 
     def __init__(self, lang: str = "ru", sample_rate: int = 16000):
         if not HAS_VOSK:
@@ -147,7 +160,12 @@ class VoskSTT:
 # Switch Vosk model at runtime (download if needed)
 
     def set_lang(self, lang: str):
-        """Switch to a different language model at runtime."""
+        """Switch to a different language model at runtime.
+
+        @contract: Downloads model if not cached; preserves current state
+        @param lang: ISO 639-1 language code (e.g. "ru", "en", "de")
+        @tags: speech, stt, vosk, streaming
+        """
         if lang == self.lang and self._model:
             return
         self.lang = lang
@@ -211,11 +229,10 @@ class VoskSTT:
     def process(self, audio_chunk: np.ndarray) -> str:
         """Process an audio chunk and return new partial text.
 
-        Args:
-            audio_chunk: float32 numpy array of audio (e.g. 1024 samples)
-
-        Returns:
-            Latest partial transcription (e.g. "окей код прив...")
+        @contract: Returns latest partial; queues finalized utterances internally
+        @param audio_chunk: float32 samples (e.g. 1024 samples at 16kHz)
+        @returns: Latest partial transcription string (may be empty)
+        @tags: speech, stt, vosk, streaming
         """
         # Vosk expects int16 PCM
         chunk = np.clip(audio_chunk, -1.0, 1.0)
@@ -236,21 +253,31 @@ class VoskSTT:
         return self._partial
 
     def get_partial(self) -> str:
-        """Get current partial transcription."""
+        """Get current partial transcription.
+
+        @returns: Latest partial text (non-empty when Vosk is mid-utterance)
+        @tags: speech, stt, vosk, streaming
+        """
         return self._partial
 
     def get_final_since_last_check(self) -> list[str]:
         """Get finalized utterance parts since last check.
 
-        Returns:
-            List of finalized text segments.
+        @contract: Drains internal queue; idempotent per segment
+        @returns: List of finalized text segments since last call
+        @tags: speech, stt, vosk, streaming
         """
         parts = list(self._final_parts)
         self._final_parts = []
         return parts
 
     def get_all_text(self) -> str:
-        """Get all accumulated finalized text."""
+        """Get all accumulated finalized text.
+
+        @contract: Drains all internal state; resets recognizer
+        @returns: Complete transcription from current session
+        @tags: speech, stt, vosk, streaming
+        """
         result = json.loads(self._rec.FinalResult())
         final = result.get("text", "").strip()
         all_text = " ".join(self._final_parts + [final])
@@ -259,7 +286,11 @@ class VoskSTT:
         return all_text
 
     def reset(self):
-        """Reset the recognizer for a new utterance."""
+        """Reset the recognizer for a new utterance.
+
+        @contract: Clears partial/final text and creates fresh KaldiRecognizer
+        @tags: speech, stt, vosk, streaming
+        """
         self._rec = KaldiRecognizer(self._model, self.sample_rate)
         self._rec.SetWords(True)
         self._partial = ""

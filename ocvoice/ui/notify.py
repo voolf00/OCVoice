@@ -1,6 +1,10 @@
 """Desktop notifications — zero external dependencies.
 
-Uses osascript on macOS, notify-send on Linux, nothing on Windows (fallback to prints).
+@contract: Sends desktop notifications via platform-native tools
+@desc: Uses osascript on macOS, notify-send on Linux, win10toast/PowerShell
+       on Windows. Falls back to stderr print if native notification unavailable.
+       No external dependencies required for basic functionality.
+@tags: ui, notification, macos, linux, windows
 """
 
 import platform
@@ -14,13 +18,12 @@ SYSTEM = platform.system()
 def notify(title: str, message: str, subtitle: str = "") -> bool:
     """Send a desktop notification.
 
-    Args:
-        title: Notification title.
-        message: Notification body text.
-        subtitle: Optional subtitle (macOS only).
-
-    Returns:
-        True if notification was sent, False if fell back to terminal.
+    @contract: Returns False only if all notification methods fail
+    @param title: Notification title
+    @param message: Notification body text
+    @param subtitle: Optional subtitle (macOS only)
+    @returns: True if notification was delivered, False if fell back to terminal
+    @tags: ui, notification
     """
     if SYSTEM == "Darwin":
         return _notify_macos(title, message, subtitle)

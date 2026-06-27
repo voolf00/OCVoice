@@ -1,8 +1,11 @@
 """OpenCode REST API client.
 
-Communicates with a running OpenCode server (opencode serve)
-via its HTTP REST API. Handles session management, message
-sending, configuration updates, and TUI control.
+@contract: Provides typed access to all OpenCode server API endpoints
+@desc: Communicates with a running OpenCode server via HTTP REST API.
+       Handles session CRUD, message sending (sync + async), project listing,
+       model/agent configuration, TUI control, and server health checks.
+       Available in sync (OpenCodeClient) and async (AsyncOpenCodeClient) variants.
+@tags: client, network, session, project, message, async
 """
 
 from typing import Optional
@@ -12,12 +15,23 @@ import httpx
 
 
 class OpenCodeError(Exception):
-    """Raised when an OpenCode API call fails."""
+    """Raised when an OpenCode API call fails.
+
+    @contract: Only raised on unrecoverable API errors (no session ID, etc.)
+    @tags: client, error
+    """
     pass
 
 
 class OpenCodeClient:
-    """Async HTTP client for the OpenCode server REST API."""
+    """Sync HTTP client for the OpenCode server REST API.
+
+    @contract: All public methods raise httpx errors on API failure
+    @desc: Thread-safe HTTP client with session tracking. Supports projects,
+           sessions, messages, commands, config, TUI, and agents endpoints.
+           Uses httpx with configurable timeout and optional auth.
+    @tags: client, network, session, project, message
+    """
 
     def __init__(
         self,
@@ -55,9 +69,11 @@ class OpenCodeClient:
 
     def health(self) -> dict:
         """Check server health.
-        
-        In OpenCode >= v1.0 this is /global/health.
-        In earlier versions, we probe /session as a connectivity check.
+
+        @contract: Always returns dict with healthy bool; never raises
+        @desc: Probes /global/health first, falls back to /session for pre-1.0
+        @returns: dict with keys: healthy (bool), optionally version/error
+        @tags: client, network
         """
         try:
             # Try the modern endpoint first
@@ -79,20 +95,32 @@ class OpenCodeClient:
             return {"healthy": False, "error": str(e)}
 
     def is_connected(self) -> bool:
-        """Check if OpenCode server is reachable."""
+        """Check if OpenCode server is reachable.
+
+        @returns: True if /global/health or /session returns 200
+        @tags: client, network
+        """
         h = self.health()
         return h.get("healthy", False)
 
     # ─── Projects ───
 
     def list_projects(self) -> list[dict]:
-        """List all projects."""
+        """List all projects.
+
+        @returns: List of project dicts with id, worktree, name
+        @tags: client, project
+        """
         r = self.client.get("/project")
         r.raise_for_status()
         return r.json()
 
     def get_current_project(self) -> dict:
-        """Get the current project."""
+        """Get the current project.
+
+        @returns: Project dict with id, worktree, vcs
+        @tags: client, project
+        """
         r = self.client.get("/project/current")
         r.raise_for_status()
         return r.json()
@@ -100,7 +128,11 @@ class OpenCodeClient:
     # ─── Sessions ───
 
     def list_sessions(self) -> list[dict]:
-        """List all sessions."""
+        """List all sessions.
+
+        @returns: List of session dicts with id, title, time, projectID
+        @tags: client, session
+        """
         r = self.client.get("/session")
         r.raise_for_status()
         return r.json()
@@ -108,7 +140,10 @@ class OpenCodeClient:
     def create_session(self, title: str = "OCVoice session") -> dict:
         """Create a new session.
 
-        Returns the session object with its ID.
+        @contract: Sets client._session_id to the new session's ID
+        @param title: Session title (default "OCVoice session")
+        @returns: Created session dict with id
+        @tags: client, session
         """
         r = self.client.post("/session", json={"title": title})
         r.raise_for_status()
@@ -117,7 +152,12 @@ class OpenCodeClient:
         return session
 
     def get_session(self, session_id: str = None) -> dict:
-        """Get session details."""
+        """Get session details.
+
+        @param session_id: Session ID (uses current if None)
+        @returns: Session dict with title, time, projectID
+        @tags: client, session
+        """
         sid = session_id or self._session_id
         if not sid:
             raise OpenCodeError("No session ID")
@@ -126,7 +166,12 @@ class OpenCodeClient:
         return r.json()
 
     def delete_session(self, session_id: str = None) -> bool:
-        """Delete a session."""
+        """Delete a session.
+
+        @param session_id: Session ID (uses current if None)
+        @returns: True on success
+        @tags: client, session
+        """
         sid = session_id or self._session_id
         if not sid:
             raise OpenCodeError("No session ID")
@@ -135,7 +180,13 @@ class OpenCodeClient:
         return True
 
     def update_session(self, title: str = None, session_id: str = None) -> dict:
-        """Update session properties (e.g. title for state indication)."""
+        """Update session properties (e.g. title for state indication).
+
+        @param title: New session title
+        @param session_id: Session ID (uses current if None)
+        @returns: Updated session dict
+        @tags: client, session
+        """
         sid = session_id or self._session_id
         if not sid:
             raise OpenCodeError("No session ID")
@@ -181,15 +232,14 @@ class OpenCodeClient:
     ) -> dict:
         """Send a text message to a session and wait for response.
 
-        Args:
-            text: The message content.
-            session_id: Target session (uses current if None).
-            model: Model in provider/model format (e.g. "anthropic/claude-sonnet-4-5").
-            agent: Agent name (e.g. "build", "plan").
-            no_reply: If True, inject context without waiting for AI response.
-
-        Returns:
-            Response dict with info and parts.
+        @contract: Blocks until AI response received (unless no_reply=True)
+        @param text: Message content to send
+        @param session_id: Target session (uses current if None)
+        @param model: Model in provider/model format (e.g. "anthropic/claude-sonnet-4-5")
+        @param agent: Agent name (e.g. "build", "plan")
+        @param no_reply: If True, inject context without waiting for response
+        @returns: Response dict with info and parts
+        @tags: client, message, session
         """
         sid = session_id or self._session_id
         if not sid:
@@ -237,13 +287,11 @@ class OpenCodeClient:
     def execute_command(self, command: str, session_id: str = None, agent: str = None) -> dict:
         """Execute a slash command (e.g. /undo, /thinking, /compact).
 
-        Args:
-            command: Command name without slash (e.g. "thinking", "undo").
-            session_id: Target session.
-            agent: Agent to use.
-
-        Returns:
-            Response dict.
+        @param command: Command name without slash ("thinking", "undo")
+        @param session_id: Target session (uses current if None)
+        @param agent: Agent to use for the command
+        @returns: Response dict
+        @tags: client, command, session
         """
         sid = session_id or self._session_id
         if not sid:
@@ -274,7 +322,11 @@ class OpenCodeClient:
     # ─── Config ───
 
     def get_config(self) -> dict:
-        """Get current OpenCode configuration."""
+        """Get current OpenCode configuration.
+
+        @returns: Config dict
+        @tags: client, config
+        """
         r = self.client.get("/config")
         r.raise_for_status()
         return r.json()
@@ -300,7 +352,11 @@ class OpenCodeClient:
             raise
 
     def list_models(self) -> list[dict]:
-        """List available models from configured providers."""
+        """List available models from configured providers.
+
+        @returns: List of model dicts with providerID, modelID
+        @tags: client, config, model
+        """
         r = self.client.get("/config/providers")
         r.raise_for_status()
         return r.json()
@@ -337,7 +393,11 @@ class OpenCodeClient:
     # ─── Agents ───
 
     def list_agents(self) -> list[dict]:
-        """List available agents."""
+        """List available agents.
+
+        @returns: List of agent dicts with id, name
+        @tags: client, agent
+        """
         r = self.client.get("/agent")
         r.raise_for_status()
         return r.json()
@@ -354,7 +414,13 @@ class OpenCodeClient:
 
 
 class AsyncOpenCodeClient:
-    """Async version of OpenCodeClient using httpx.AsyncClient."""
+    """Async version of OpenCodeClient using httpx.AsyncClient.
+
+    @contract: Same interface as OpenCodeClient but async; requires event loop
+    @desc: Async alternative for use in asyncio-based applications. Uses
+           httpx.AsyncClient with lazy initialization.
+    @tags: client, network, async, session, project, message
+    """
 
     def __init__(self, base_url: str = "http://127.0.0.1:4096", timeout: float = 120.0, prefix: str = "/session"):
         self.base_url = base_url.rstrip("/")

@@ -1,7 +1,10 @@
 """Wake word detection using openwakeword.
 
-Detects custom wake words like "окей код" / "hey code" to activate
-voice command listening.
+@contract: Detects configured wake words in real-time audio streams
+@desc: Uses openwakeword (ONNX) for ML-based wake word detection with
+       energy-based fallback (SimpleWakeWordDetector). Supports multiple
+       simultaneous wake words with cooldown to prevent re-triggering.
+@tags: wake, audio, streaming, onnx
 """
 
 import time
@@ -20,7 +23,11 @@ except ImportError:
 class WakeWordDetector:
     """Detects wake words using openwakeword models.
 
-    Supports custom wake words and multiple phrases simultaneously.
+    @contract: Returns matching wake word string or None
+    @desc: Loads openwakeword ONNX models per configured wake word.
+           Maps custom phrases (e.g. "окей код") to the closest built-in model.
+           Cooldown prevents rapid re-triggering of the same phrase.
+    @tags: wake, audio, onnx
     """
 
     # Built-in wake word models available in openwakeword
@@ -84,11 +91,10 @@ class WakeWordDetector:
     def process(self, audio_chunk: np.ndarray) -> Optional[str]:
         """Process an audio chunk and detect wake words.
 
-        Args:
-            audio_chunk: numpy array of float32 samples (must match chunk_size).
-
-        Returns:
-            Wake word string if detected, None otherwise.
+        @contract: Returns None if no wake word or within cooldown period
+        @param audio_chunk: float32 samples, must match chunk_size (1280)
+        @returns: Wake word model name if detected, None otherwise
+        @tags: wake, audio
         """
         if len(audio_chunk) < self.chunk_size:
             return None
@@ -114,7 +120,10 @@ class WakeWordDetector:
         return None
 
     def reset(self):
-        """Reset predictor state."""
+        """Reset predictor state and detection cooldowns.
+
+        @tags: wake, audio
+        """
         self._model.reset()
         self._last_detection_time.clear()
 
@@ -122,8 +131,11 @@ class WakeWordDetector:
 class SimpleWakeWordDetector:
     """Lightweight wake word detector using audio energy + pattern matching.
 
-    Fallback when openwakeword is not available. Less accurate but
-    has zero dependencies beyond numpy.
+    @contract: Detects loud audio spikes as potential wake words
+    @desc: Fallback when openwakeword is not available. Uses RMS energy
+           spike detection. Less accurate but zero dependencies beyond numpy.
+    @tags: wake, audio, fallback
+    @bug: Only detects loud sounds, not specific words — high false positive rate
     """
 
     def __init__(
@@ -146,8 +158,10 @@ class SimpleWakeWordDetector:
     def process(self, audio_chunk: np.ndarray) -> Optional[str]:
         """Simple energy-based wake word detection.
 
-        This is a placeholder — it detects loud sounds as potential
-        wake words. Real detection requires a trained model.
+        @contract: May return false positives on any loud sound
+        @param audio_chunk: float32 samples
+        @returns: "energy_spike" if energy exceeds threshold, None otherwise
+        @tags: wake, audio, fallback
         """
         if len(audio_chunk) == 0:
             return None

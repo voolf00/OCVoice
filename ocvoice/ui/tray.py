@@ -1,8 +1,10 @@
 """System tray icon for OCVoice (Linux/Windows).
 
-On macOS, use menubar.py instead (rumps — native macOS menu bar).
-Shows an icon in the system tray with status, session/project selection,
-and quick actions. Menu is dynamic — rebuilt from poller data.
+@contract: Provides system tray UI with dynamic menus for daemon interaction
+@desc: Uses pystray for cross-platform system tray (Linux/Windows). Shows
+       status-colored icon, session/project submenus, agent switching, and
+       settings access. Menu dynamically rebuilt from poller data.
+@tags: ui, tray, linux, windows, session, project, agent
 """
 
 import threading
@@ -21,7 +23,13 @@ except ImportError:
 # System tray (Linux/Win) via pystray
 
 class TrayIcon:
-    """System tray icon — works on Linux/Windows with threading."""
+    """System tray icon — works on Linux/Windows with threading.
+
+    @contract: Provides pystray icon with status updates and dynamic menus
+    @desc: Creates a colored dot icon (64x64) with status-appropriate color.
+           Menu rebuilds on state changes. Runs icon in daemon thread.
+    @tags: ui, tray, linux, windows
+    """
 
     STATUS_COLORS = {
         "stopped": "#FF4444",
@@ -323,7 +331,13 @@ class TrayIcon:
 # Tray lifecycle manager
 
 class TrayManager:
-    """Manages the tray icon lifecycle and communicates with the daemon."""
+    """Manages the tray icon lifecycle and communicates with the daemon.
+
+    @contract: Provides start/stop/update for the system tray
+    @desc: Wraps TrayIcon lifecycle. Registers callbacks for toggle, exit,
+           session/project selection, language/agent switching.
+    @tags: ui, tray, lifecycle, linux, windows
+    """
 
     def __init__(self):
         self.tray: Optional[TrayIcon] = None

@@ -1,7 +1,10 @@
 """Intent definitions for OCVoice.
 
-Maps recognized voice commands to intents that drive OpenCode API calls.
-Support for both Russian and English commands.
+@contract: Defines all known voice command intents and their regex patterns
+@desc: Maps recognized voice commands (RU + EN) to Intent enum values.
+       Provides regex patterns, message trigger phrases, and end phrases
+       for the intent parser and daemon.
+@tags: intent, parser, session, project, message, cli
 """
 
 from enum import Enum
@@ -9,7 +12,14 @@ from typing import Optional
 
 
 class Intent(str, Enum):
-    """Known voice command intents."""
+    """Known voice command intents.
+
+    @contract: All recognized voice commands map to one of these values
+    @desc: Enum of all intents the voice daemon can recognize and execute.
+           Covers session management, project switching, model/agent control,
+           message sending, and OpenCode IDE actions.
+    @tags: intent, parser
+    """
 
     # Session management
     NEW_SESSION = "new_session"

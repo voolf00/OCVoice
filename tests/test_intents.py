@@ -6,6 +6,14 @@ from ocvoice.intent.intents import Intent
 
 
 class TestProjectIntents:
+    """Test project-related intent parsing (RU + EN).
+
+    @contract: All tests assert exact Intent enum match
+    @desc: Tests CURRENT_PROJECT and LIST_PROJECTS intents in both
+           Russian and English variations.
+    @tags: test, intent, parser, project
+    """
+
     parser = RegexIntentParser()
 
     def test_current_project_ru(self):
@@ -38,6 +46,12 @@ class TestProjectIntents:
 
 
 class TestSwitchProjectIntent:
+    """Test SWITCH_PROJECT intent in RU and EN.
+
+    @contract: Tests that switch commands extract the project name argument
+    @tags: test, intent, parser, project
+    """
+
     parser = RegexIntentParser()
 
     def test_switch_project_ru(self):
@@ -50,6 +64,12 @@ class TestSwitchProjectIntent:
 
 
 class TestSessionIntents:
+    """Test session-related intent parsing.
+
+    @contract: Tests SWITCH_SESSION, NEW_SESSION, LIST_SESSIONS intents
+    @tags: test, intent, parser, session
+    """
+
     parser = RegexIntentParser()
 
     def test_switch_session_sticks(self):

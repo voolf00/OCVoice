@@ -1,6 +1,10 @@
 """OpenCode process launcher.
 
-Spawns and manages the opencode serve process.
+@contract: Manages the opencode serve process lifecycle (start/stop/restart)
+@desc: Spawns opencode serve as a subprocess, waits for health endpoint,
+       manages PID file for crash recovery. Supports configurable binary path,
+       host, port, and working directory.
+@tags: launcher, network, process, lifecycle
 """
 
 import os
@@ -13,7 +17,14 @@ from typing import Optional
 
 
 class OpenCodeLauncher:
-    """Manages the opencode serve process lifecycle."""
+    """Manages the opencode serve process lifecycle.
+
+    @contract: Provides idempotent start/stop operations
+    @desc: Spawns opencode serve subprocess with health check polling.
+           Saves PID to ~/.config/ocvoice/opencode.pid for recovery.
+           Cleans up on stop with SIGTERM → SIGKILL escalation.
+    @tags: launcher, process, lifecycle
+    """
 
     def __init__(
         self,
@@ -33,11 +44,10 @@ class OpenCodeLauncher:
     def start(self, timeout: float = 30.0) -> bool:
         """Start opencode serve.
 
-        Args:
-            timeout: Maximum time to wait for server to be ready.
-
-        Returns:
-            True if server started successfully.
+        @contract: Idempotent — returns True if already running
+        @param timeout: Max seconds to wait for health endpoint
+        @returns: True if server is ready within timeout
+        @tags: launcher, process
         """
         if self.is_running():
             print("[OCVoice] OpenCode server already running")
@@ -80,7 +90,12 @@ class OpenCodeLauncher:
             return False
 
     def stop(self, timeout: float = 5.0):
-        """Stop the opencode serve process."""
+        """Stop the opencode serve process.
+
+        @contract: Idempotent; cleans up PID file
+        @param timeout: Max seconds to wait for graceful SIGTERM
+        @tags: launcher, process
+        """
         if self._process:
             print("[OCVoice] Stopping OpenCode server...")
             self._process.send_signal(signal.SIGTERM)
@@ -104,7 +119,12 @@ class OpenCodeLauncher:
             self._pid_file.unlink(missing_ok=True)
 
     def is_running(self) -> bool:
-        """Check if opencode serve is running."""
+        """Check if opencode serve is running.
+
+        @contract: Checks PID file AND HTTP health endpoint
+        @returns: True if process is alive and serving
+        @tags: launcher, process
+        """
         # Check via PID file
         if self._pid_file.exists():
             try:
@@ -160,7 +180,12 @@ class OpenCodeLauncher:
         return False
 
     def restart(self) -> bool:
-        """Restart opencode serve."""
+        """Restart opencode serve.
+
+        @contract: Stop then start; waits 1s between
+        @returns: True if restart succeeded
+        @tags: launcher, process
+        """
         self.stop()
         time.sleep(1)
         return self.start()

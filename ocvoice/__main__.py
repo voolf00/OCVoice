@@ -1,4 +1,10 @@
-"""OCVoice entry point."""
+"""OCVoice entry point and CLI dispatcher.
+
+@contract: Parses CLI args and dispatches to the correct submodule
+@desc: Entry point for `python -m ocvoice` and the `ocv` launcher script.
+       Routes commands to daemon, enrollment, status, IPC, and utilities.
+@tags: cli, daemon, enrollment, ipc, config, launcher
+"""
 
 import sys
 from .config import Config

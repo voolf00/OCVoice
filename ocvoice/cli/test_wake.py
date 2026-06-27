@@ -1,4 +1,11 @@
-"""Test wake word detection + speaker verification. No messages sent."""
+"""Test wake word detection + speaker verification.
+
+@contract: Runs a 15-second wake word test with Vosk + speaker verification
+@desc: Interactive CLI tool that captures audio, runs Vosk streaming STT,
+       detects configured wake words, and optionally tests speaker verification.
+       No messages are sent to OpenCode. Useful for debugging mic/setup issues.
+@tags: test, wake, speaker, vosk, audio
+"""
 
 import re
 import time

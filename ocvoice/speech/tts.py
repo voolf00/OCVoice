@@ -1,9 +1,10 @@
 """Text-to-Speech module.
 
-Converts OpenCode text responses to spoken audio.
-Supports:
-- Edge TTS (Microsoft Edge TTS, free, high quality, many voices)
-- Piper TTS (fully offline, lightweight)
+@contract: Converts text to spoken audio via configurable backends
+@desc: Supports Edge TTS (Microsoft Edge, free, high-quality, many voices)
+       and Piper TTS (fully offline, lightweight). Auto-detects language for
+       voice selection. Cleans markdown/code from text before speaking.
+@tags: speech, tts, edge, piper, audio, playback
 """
 
 import asyncio
@@ -20,7 +21,13 @@ import numpy as np
 # Edge TTS (cloud, high quality, many voices)
 
 class EdgeTTS:
-    """Text-to-Speech using Microsoft Edge TTS (free, online)."""
+    """Text-to-Speech using Microsoft Edge TTS (free, online).
+
+    @contract: Converts text to MP3 audio bytes or saves to file
+    @desc: Uses edge-tts library to access Microsoft Edge's neural TTS voices.
+           Supports speed adjustment and many languages/voices. Requires internet.
+    @tags: tts, edge, streaming
+    """
 
     def __init__(
         self,
@@ -80,8 +87,10 @@ class EdgeTTS:
 class PiperTTS:
     """Text-to-Speech using Piper TTS (offline).
 
-    Piper is a fast, local neural TTS system. Requires downloading
-    voice models from https://github.com/rhasspy/piper.
+    @contract: Converts text to WAV audio bytes via piper binary
+    @desc: Fast local neural TTS. Requires piper executable in PATH and
+           voice model .onnx files. Supports speed/length-scale adjustment.
+    @tags: tts, piper, local, offline
     """
 
     def __init__(
@@ -175,7 +184,14 @@ class PiperTTS:
 # Master TTS with language detection + text cleaning
 
 class TextToSpeech:
-    """Unified TTS interface with auto language detection."""
+    """Unified TTS interface with auto language detection.
+
+    @contract: Speaks text via selected backend with language-aware voice
+    @desc: Routes text to Edge TTS or Piper TTS based on config. Auto-detects
+           Russian vs English, strips markdown code blocks, truncates long text.
+           Uses afplay (macOS) or ffmpeg+sounddevice (Linux/Win) for playback.
+    @tags: tts, playback, edge, piper
+    """
 
     def __init__(
         self,

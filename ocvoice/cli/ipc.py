@@ -1,4 +1,11 @@
-"""IPC between CLI and daemon via JSON command file."""
+"""IPC between CLI and daemon via JSON command file.
+
+@contract: Provides reliable CLI↔daemon communication via file-based IPC
+@desc: CLI writes commands to ~/.config/ocvoice/command.json, daemon polls
+       and processes them. Commands expire after 10 seconds to prevent stale
+       execution. Supports any JSON-serializable command payload.
+@tags: ipc, cli, daemon
+"""
 
 import json
 import time

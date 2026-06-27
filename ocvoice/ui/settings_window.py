@@ -1,7 +1,10 @@
 """Settings window for OCVoice.
 
-Uses CustomTkinter for a modern native-looking settings dialog.
-Launched as a subprocess to avoid main-thread conflicts with rumps/pystray.
+@contract: Provides GUI for editing all OCVoice configuration settings
+@desc: Uses CustomTkinter for a modern native-looking settings dialog.
+       Launched as a subprocess (not blocking daemon main thread).
+       Saves to ~/.config/ocvoice/config.toml and triggers daemon reload via IPC.
+@tags: ui, settings, config, gui
 """
 
 import json
@@ -101,6 +104,16 @@ def open_settings_window():
 
 
 class SettingsWindow:
+    """GUI settings window using CustomTkinter.
+
+    @contract: Loads current config, presents editable form, saves on Apply
+    @desc: Builds scrollable settings UI with wake words, send phrases,
+           language, silence timeout, wake sensitivity, speaker threshold,
+           voice mode, audio device, speaker verification, TTS settings,
+           and enrollment controls. Saves to config.toml on Apply.
+    @tags: ui, settings, config, gui
+    """
+
     def __init__(self):
         ctk.set_appearance_mode("System")
         ctk.set_default_color_theme("blue")

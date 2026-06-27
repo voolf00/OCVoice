@@ -22,7 +22,14 @@ except ImportError:
 # Real-time audio capture via sounddevice InputStream
 
 class AudioCapture:
-    """Captures audio from the default microphone into a ring buffer."""
+    """Captures audio from the default microphone into a ring buffer.
+
+    @contract: Delivers audio chunks from mic via thread-safe ring buffer
+    @desc: Runs a sounddevice InputStream thread, stores float32 samples
+           in a ring buffer deque. Provides blocking read() with timeout
+           and non-blocking read_all().
+    @tags: audio, capture, streaming
+    """
 
     def __init__(
         self,
@@ -76,7 +83,11 @@ class AudioCapture:
         self._data_event.set()
 
     def start(self):
-        """Start audio capture."""
+        """Start audio capture.
+
+        @contract: Idempotent — safe to call multiple times
+        @tags: audio, capture, lifecycle
+        """
         if self._running:
             return
 
@@ -93,7 +104,11 @@ class AudioCapture:
         print(f"[OCVoice] Audio capture started (SR={self.sample_rate}, CH={self.channels})")
 
     def stop(self):
-        """Stop audio capture."""
+        """Stop audio capture.
+
+        @contract: Closes sounddevice stream; safe to call when not running
+        @tags: audio, capture, lifecycle
+        """
         self._running = False
         if self._stream:
             self._stream.stop()
@@ -104,8 +119,11 @@ class AudioCapture:
     def read(self, num_samples: int, timeout: float = 1.0) -> np.ndarray:
         """Read num_samples from the ring buffer.
 
-        Blocks until enough data is available or timeout expires.
-        Returns numpy array of float32 samples.
+        @contract: Blocks until data available or timeout; returns partial on timeout
+        @param num_samples: Number of float32 samples to read
+        @param timeout: Max block time in seconds (default 1.0)
+        @returns: Float32 numpy array, may be shorter than num_samples on timeout
+        @tags: audio, capture
         """
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -125,7 +143,12 @@ class AudioCapture:
             return np.array(data, dtype=np.float32)
 
     def read_all(self) -> np.ndarray:
-        """Read all available data from the ring buffer."""
+        """Read all available data from the ring buffer.
+
+        @contract: Drains the buffer completely
+        @returns: Float32 numpy array of all buffered samples (may be empty)
+        @tags: audio, capture
+        """
         with self._lock:
             data = list(self._buffer)
             self._buffer.clear()
@@ -164,7 +187,14 @@ class AudioCapture:
 # Find best input mic (prefer built-in)
 
     def auto_detect_device() -> int:
-        """Auto-detect best input device. Prefers built-in mic, avoids iPhone/Bluetooth."""
+        """Auto-detect best input device.
+
+        @contract: Returns a valid device index or 0
+        @desc: Prefers built-in MacBook mic, avoids iPhone and Bluetooth devices.
+               Scores devices by name heuristics.
+        @returns: Device index suitable for AudioCapture
+        @tags: audio, capture, macos
+        """
         if not HAS_SOUNDDEVICE:
             return 0
         devices = sd.query_devices()

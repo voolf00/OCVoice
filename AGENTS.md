@@ -1,9 +1,39 @@
-# OpenCode Voice (OCVoice)
+# OCVoice — Documentation Convention (GRACE)
 
-Voice assistant for OpenCode. Background daemon with speech recognition,
-speaker verification, and full project/session management via voice or UI.
+All code MUST have inline GRACE-style documentation in docstrings.
 
-## How to use with this project
+## GRACE tags
+
+| Tag | Required? | Where | Description |
+|-----|-----------|-------|-------------|
+| `@contract` | **yes** | module, class, public method | What the unit guarantees (postcondition/invariant) |
+| `@desc` | **yes** | module, class, public method | What it does in plain language |
+| `@tags` | **yes** | module, class, public method | Comma-separated keywords for search/discovery |
+| `@param` | when applicable | method | Typed parameter descriptions |
+| `@returns` | when applicable | method | Return value contract |
+| `@example` | optional | class, method | Usage example |
+| `@bug` | optional | module, class, method | Known bugs or limitations |
+
+## Rules
+
+1. Every module, class, and public method MUST have `@contract` + `@desc` + `@tags`
+2. Doc is embedded IN the code — no separate .md documentation files
+3. Documentation changes WITH code (always in sync, never stale)
+4. ALL agents MUST follow this convention in every session
+5. `@tags` use a controlled vocabulary (see codebase for existing tags)
+6. `@bug` must be added when a known limitation is discovered
+
+## Controlled tag vocabulary
+
+`config`, `daemon`, `audio`, `capture`, `vad`, `wake`,
+`speech`, `stt`, `vosk`, `tts`, `speaker`,
+`intent`, `parser`, `network`, `client`, `async`,
+`session`, `project`, `message`, `cli`, `ipc`,
+`ui`, `menubar`, `tray`, `settings`, `overlay`,
+`notification`, `discovery`, `launcher`, `test`,
+`macos`, `linux`, `windows`, `enrollment`, `verification`
+
+## How to use
 
 ```bash
 ocv start          # Start daemon (menubar/tray appears)
@@ -16,7 +46,7 @@ ocv ptt           # Push-to-talk (one command, no wake word)
 
 Speak commands in **Russian** or **English**.
 
-## Voice commands
+## Quick reference: voice commands
 
 | Command | Action |
 |---------|--------|
@@ -27,81 +57,3 @@ Speak commands in **Russian** or **English**.
 | `"дарвин, последняя сессия"` | Back to most recent |
 | `"дарвин, стоп"` | Pause listening |
 | `"дарвин, найди сервер"` | Rediscover IDE |
-
-## Architecture
-
-- **Daemon** runs in background, auto-discovers IDE server, singleton lock
-- **Vosk** streams speech in real-time (Vosk model per language)
-- **faster-whisper** fallback for accuracy
-- **Speaker verification** (Resemblyzer/SpeechBrain) filters non-user voices
-- **Projects** read from `opencode.global.dat` + SQLite `project` table
-- **Sessions** filtered per project via SQLite JOIN (`session` + `project`)
-- **Fuzzy matching** (difflib) + Russian→Latin transliteration for names
-- **Messages** sent sync via `/session/:id/message` (waits for AI response)
-- **Settings** stored in `~/.config/ocvoice/config.toml` (or GUI via CustomTkinter)
-
-## UI
-
-- **macOS:** Menu bar (rumps) — 🎤 icon with project/session/agent menus
-- **Linux/Windows:** System tray (pystray) — same functionality
-- **CLI:** `ocv select [session|project|status]` — interactive picker
-- **Settings:** CustomTkinter window — wake/send phrases, language, sensitivity, TTS, enrollment
-
-## State indicators
-
-Session title and menubar/tray icon update automatically:
-
-```
-🟢 ожидает → 🔵 команда → 🟣 ответ... → 🟢 ожидает
-```
-
-Also in `~/.config/ocvoice/state.json`.
-
-## Config
-
-Key file: `~/.config/ocvoice/config.toml`
-
-```toml
-[audio]
-device_id = 1
-
-[voice]
-language = "ru"
-wake_words = ["дарвин", "darwin"]
-send_phrases = ["отправь", "отправляй", "отправить", "send", "go", "done"]
-wake_sensitivity = 0.5
-silence_timeout = 0.8
-
-[speech.speaker]
-enabled = true
-threshold = 0.5
-
-[speech.stt]
-backend = "auto"
-
-[speech.tts]
-enabled = true
-read_code = false
-voice_ru = "ru-RU-SvetlanaNeural"
-voice_en = "en-US-JennyNeural"
-
-[ui]
-menubar = true
-tray_enabled = false
-```
-
-## Key files
-
-- `ocvoice/daemon.py` — main loop, state management, voice command processing
-- `ocvoice/opencode/client.py` — OpenCode HTTP API client
-- `ocvoice/opencode/ide_discovery.py` — server port scanning
-- `ocvoice/speech/vosk_stt.py` — Vosk streaming (all language models)
-- `ocvoice/speech/speaker.py` — Resemblyzer/SpeechBrain verification
-- `ocvoice/intent/parser.py` — regex intent parser (RU/EN patterns)
-- `ocvoice/intent/intents.py` — intent definitions and patterns
-- `ocvoice/ui/menubar.py` — macOS menu bar
-- `ocvoice/ui/tray.py` — system tray
-- `ocvoice/ui/settings_window.py` — CustomTkinter settings GUI
-- `ocvoice/cli/select.py` — interactive project/session picker
-- `ocvoice/cli/ipc.py` — CLI↔daemon IPC via JSON file
-- `ocvoice/config.py` — config loader with save support

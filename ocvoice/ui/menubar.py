@@ -1,8 +1,11 @@
 """macOS Menu Bar app for OCVoice.
 
-Uses rumps for native macOS menu bar integration.
-Runs on the main thread — safe from PyObjC threading issues.
-Provides dynamic session/project selection via rumps timer refresh.
+@contract: Provides native macOS menu bar UI for daemon interaction
+@desc: Uses rumps for native macOS menu bar integration. Runs on the main
+       thread (required by macOS). Provides dynamic session/project selection,
+       agent switching, state indicator icon (🟢🔵🟣🔴), and settings access.
+       Menu is rebuilt every 2 seconds via rumps timer for live updates.
+@tags: ui, menubar, macos, session, project, agent
 """
 
 import sys
@@ -20,7 +23,14 @@ except ImportError:
 # macOS menu bar via rumps — sessions/projects/agent
 
 class OCVoiceMenuBar(rumps.App if HAS_RUMPS else object):
-    """Menu bar icon for OCVoice with session/project selection."""
+    """Menu bar icon for OCVoice with session/project selection.
+
+    @contract: Provides dynamic menu reflecting current daemon state
+    @desc: Builds rumps menu with project, session, agent submenus and
+           state controls. Menu auto-refreshes via rumps @timer(2).
+           Falls back gracefully if rumps not installed.
+    @tags: ui, menubar, macos
+    """
 
     def __init__(self, callbacks: dict):
         self._callbacks = callbacks
@@ -272,7 +282,14 @@ class OCVoiceMenuBar(rumps.App if HAS_RUMPS else object):
 # Menu bar lifecycle (start/stop/update)
 
 class MenuBarManager:
-    """Manages the menu bar app lifecycle."""
+    """Manages the menu bar app lifecycle.
+
+    @contract: Provides start/stop/update for the macOS menu bar
+    @desc: Wraps OCVoiceMenuBar lifecycle. Registers callbacks for toggle,
+           quit, session/project selection, language/agent switching,
+           server discovery, and new session creation.
+    @tags: ui, menubar, lifecycle, macos
+    """
 
     def __init__(self):
         self._app: Optional[OCVoiceMenuBar] = None

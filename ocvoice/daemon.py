@@ -1,7 +1,12 @@
 """Voice Daemon — the core loop of OCVoice.
 
-Orchestrates the full pipeline:
-  Audio → VAD → Wake Word → STT → Speaker Verify → Intent → OpenCode API
+@contract: Orchestrates the full audio→action pipeline in a continuous loop
+@desc: Manages the complete voice control pipeline:
+       Audio → VAD → Wake Word → STT → Speaker Verify → Intent → OpenCode API.
+       Runs as a singleton daemon with macOS menu bar / system tray integration.
+       Recovers automatically from audio device failures.
+@tags: daemon, audio, capture, vad, wake, speech, stt, intent, client, session, project, ui, menubar, tray
+@bug: Vosk fuzzy matching has false positives on short utterances
 """
 
 import difflib
@@ -36,7 +41,15 @@ from .ui.notify import notify
 
 
 class VoiceDaemon:
-    """Main voice control daemon."""
+    """Main voice control daemon.
+
+    @contract: Maintains the audio→action pipeline in a single process
+    @desc: Manages all OCVoice components: audio capture, VAD, wake word,
+           speech-to-text (Vosk streaming), speaker verification, intent
+           parsing, and OpenCode API communication. Runs the macOS menu bar
+           on the main thread and audio processing in a background thread.
+    @tags: daemon, audio, capture, vad, wake, speech, stt, intent, client, session, project, ui, menubar, tray
+    """
 
     def __init__(self, config: Config):
         self.config = config
@@ -175,7 +188,15 @@ class VoiceDaemon:
             self.tray.update(state)
 
     def setup(self) -> bool:
-        """Initialize all components. Returns False on critical failure."""
+        """Initialize all components.
+
+        @contract: Returns False on critical failure (no audio device)
+        @desc: Discovers OpenCode server, starts audio capture, initializes
+               VAD, wake word, STT, Vosk, speaker verifier, intent parser,
+               and UI components (menu bar/tray/overlay).
+        @returns: False if audio capture initialization fails
+        @tags: daemon, setup
+        """
         print("[OCVoice] Initializing voice daemon...")
 
         # ── Step 0: Discover OpenCode IDE/CLI server ──
@@ -378,7 +399,13 @@ class VoiceDaemon:
         return True
 
     def run(self):
-        """Main entry — menu bar on main thread, audio loop in background."""
+        """Main entry — menu bar on main thread, audio loop in background.
+
+        @contract: Blocks until daemon shutdown (Ctrl+C or menubar quit)
+        @desc: Acquires daemon lock, runs setup, starts audio polling thread,
+               session poller thread, and blocks on the menu bar main loop.
+        @tags: daemon, lifecycle
+        """
         if not self._acquire_daemon_lock():
             return
         if not self.setup():

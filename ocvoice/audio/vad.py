@@ -1,7 +1,10 @@
 """Voice Activity Detection using webrtcvad.
 
-Detects speech segments in real-time audio streams, filtering out
-silence and background noise.
+@contract: Detects speech segments in real-time audio streams
+@desc: Filters silence and background noise from audio streams using
+       WebRTC VAD as primary and Silero VAD (ONNX) as alternative.
+       Tracks speech start/end edges for segment boundary detection.
+@tags: audio, vad, streaming
 """
 
 from typing import Optional
@@ -18,8 +21,11 @@ except ImportError:
 class VoiceActivityDetector:
     """Detects voice activity in audio frames.
 
-    Uses WebRTC VAD which is optimized for speech and works well
-    across languages.
+    @contract: Reports speech/silence state with rising/falling edge detection
+    @desc: Uses WebRTC VAD optimized for speech across languages.
+           Configurable aggressiveness and silence frame count.
+           Tracks speech start and end transitions for segment detection.
+    @tags: vad, audio, streaming
     """
 
     # WebRTC VAD supports frame sizes: 10, 20, or 30 ms
@@ -65,12 +71,9 @@ class VoiceActivityDetector:
     def is_speech(self, audio_frame: np.ndarray) -> bool:
         """Check if an audio frame contains speech.
 
-        Args:
-            audio_frame: numpy array of float32 samples,
-                         must match frame_size.
-
-        Returns:
-            True if speech detected.
+        @param audio_frame: float32 samples, should match frame_size
+        @returns: True if WebRTC VAD detects speech
+        @tags: vad, audio
         """
         if len(audio_frame) != self.frame_size:
             if len(audio_frame) < self.frame_size:
@@ -86,10 +89,10 @@ class VoiceActivityDetector:
     def process(self, audio_frame: np.ndarray) -> dict:
         """Process an audio frame and return VAD state.
 
-        Returns dict with keys:
-            is_speaking: bool — currently in speech segment
-            speech_started: bool — speech just started (rising edge)
-            speech_ended: bool — speech just ended (falling edge)
+        @contract: Returns edges only once per transition
+        @param audio_frame: float32 samples
+        @returns: dict with keys: is_speaking, speech_started, speech_ended
+        @tags: vad, audio
         """
         speech = self.is_speech(audio_frame)
 
@@ -118,7 +121,10 @@ class VoiceActivityDetector:
         return result
 
     def reset(self):
-        """Reset internal state."""
+        """Reset internal speech/silence counters.
+
+        @tags: vad, audio
+        """
         self._silence_count = 0
         self._speech_count = 0
         self._is_speaking = False
@@ -127,8 +133,11 @@ class VoiceActivityDetector:
 class SileroVAD:
     """Alternative VAD using Silero VAD model (via ONNX).
 
-    More accurate than WebRTC VAD but requires additional dependencies.
-    Falls back gracefully if not available.
+    @contract: Returns speech probability 0.0–1.0
+    @desc: More accurate than WebRTC VAD. Requires torch + onnxruntime.
+           Auto-downloads the model on first use. Returns 0.0 if unavailable.
+    @tags: vad, audio, onnx
+    @bug: Requires manual model download first time; no progress bar
     """
 
     def __init__(self, sample_rate: int = 16000, threshold: float = 0.5):
@@ -177,9 +186,11 @@ class SileroVAD:
             )
 
     def is_speech(self, audio: np.ndarray) -> float:
-        """Check speech probability (0.0 - 1.0).
+        """Check speech probability.
 
-        Returns probability, not loaded returns 0.
+        @param audio: float32 samples (must be ≥512 samples at 16kHz)
+        @returns: Probability 0.0–1.0 (0.0 if model not loaded)
+        @tags: vad, audio
         """
         if not self._load_model():
             return 0.0

@@ -1,8 +1,11 @@
 """Speaker verification using SpeechBrain ECAPA-TDNN.
 
-Enrolls a user's voice and verifies that subsequent utterances
-come from the same speaker. Prevents background radio, other people,
-etc. from triggering commands.
+@contract: Verifies speaker identity from audio against enrolled voice prints
+@desc: Enrolls a user's voice and verifies subsequent utterances via cosine
+       similarity of voice embeddings. Uses SpeechBrain ECAPA-TDNN as primary,
+       Resemblyzer as fallback. Prevents non-enrolled speakers from triggering
+       voice commands.
+@tags: speech, speaker, verification, enrollment, embeddings
 """
 
 import json
@@ -31,10 +34,11 @@ except ImportError:
 class SpeakerVerifier:
     """Speaker verification system.
 
-    Uses SpeechBrain's ECAPA-TDNN model to create voice embeddings
-    and compare them via cosine similarity.
-
-    If SpeechBrain is not available, falls back to Resemblyzer.
+    @contract: Returns match decision with confidence score from audio input
+    @desc: Creates voice embeddings via SpeechBrain ECAPA-TDNN (or Resemblyzer
+           fallback). Compares against stored enrollment via cosine similarity.
+           Manages multiple speaker profiles on disk.
+    @tags: speaker, verification, enrollment, embeddings
     """
 
     def __init__(
@@ -95,11 +99,13 @@ class SpeakerVerifier:
     def enroll(self, name: str = "default", duration: float = 10.0):
         """Enroll a speaker's voice.
 
-        Records audio from the microphone and saves the voice embedding.
-
-        Args:
-            name: Speaker name (for multiple profiles).
-            duration: Recording duration in seconds.
+        @contract: Records mic audio and saves embedding to disk
+        @desc: Prompts user to read a phrase, records for duration seconds,
+               creates and saves voice embedding.
+        @param name: Speaker profile name (for multiple profiles)
+        @param duration: Recording duration in seconds
+        @returns: True on successful enrollment
+        @tags: speaker, enrollment
         """
         self._load_model()
 
@@ -140,13 +146,12 @@ class SpeakerVerifier:
     def enroll_from_audio(self, audio: np.ndarray, sample_rate: int, name: str = "default") -> bool:
         """Enroll a speaker from already-recorded audio.
 
-        Args:
-            audio: float32 numpy array of audio samples.
-            sample_rate: Sample rate of audio.
-            name: Speaker name.
-
-        Returns:
-            True on success.
+        @contract: Resamples if needed, creates and saves embedding
+        @param audio: float32 samples
+        @param sample_rate: Sample rate of input audio
+        @param name: Speaker profile name
+        @returns: True on successful enrollment
+        @tags: speaker, enrollment
         """
         self._load_model()
         if self._backend == "none":
@@ -171,12 +176,11 @@ class SpeakerVerifier:
     def verify(self, audio: np.ndarray, name: str = "default") -> dict:
         """Verify that audio matches the enrolled speaker.
 
-        Args:
-            audio: float32 numpy array of audio samples.
-            name: Speaker name to verify against.
-
-        Returns:
-            dict with keys: match (bool), score (float), backend (str)
+        @contract: Always returns dict; returns match=True if no enrollment
+        @param audio: float32 samples (at least 0.5s recommended)
+        @param name: Speaker profile to verify against
+        @returns: dict with keys: match (bool), score (float), backend (str)
+        @tags: speaker, verification
         """
         self._load_model()
 
@@ -323,11 +327,20 @@ class SpeakerVerifier:
         return float(np.dot(a, b) / (a_norm * b_norm))
 
     def is_enrolled(self, name: str = "default") -> bool:
-        """Check if a speaker profile exists."""
+        """Check if a speaker profile exists.
+
+        @param name: Speaker profile name
+        @returns: True if enrollment .npy file exists on disk
+        @tags: speaker, enrollment
+        """
         return (self.enrollments_dir / f"{name}.npy").exists()
 
     def list_enrollments(self) -> list[str]:
-        """List all enrolled speaker names."""
+        """List all enrolled speaker names.
+
+        @returns: List of profile names (stems of .npy files in enrollments dir)
+        @tags: speaker, enrollment
+        """
         if not self.enrollments_dir.exists():
             return []
         return [

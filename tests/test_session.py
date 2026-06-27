@@ -21,7 +21,14 @@ def make_session(id: str, title: str, updated: float):
 
 
 class TestSessionPollerManualOverride:
-    """Test that manual session selection sticks for 30 seconds."""
+    """Test that manual session selection sticks for 30 seconds.
+
+    @contract: All tests use mocked VoiceDaemon with MagicMock config
+    @desc: Tests manual session lock behavior — ensures manual selection
+           is preserved during lock period and session auto-switch works
+           after lock expires. Also tests edge cases (no user sessions).
+    @tags: test, session, daemon, poller
+    """
 
     def test_manual_session_until_defaults_to_zero(self):
         config = MagicMock()

@@ -1,7 +1,10 @@
 """CLI for interactive project/session selection.
 
-Communicates with the running daemon via a JSON command file
-at ~/.config/ocvoice/command.json.
+@contract: Provides interactive terminal UI for browsing projects/sessions
+@desc: Discovers OpenCode server, fetches projects from global.dat + SQLite DB,
+       displays numbered lists for interactive selection, sends commands to
+       daemon via IPC. Supports fuzzy matching via difflib.
+@tags: cli, session, project, discovery, ipc
 """
 
 import sys

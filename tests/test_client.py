@@ -10,7 +10,13 @@ from ocvoice.opencode.client import OpenCodeClient
 
 
 class TestProjectMethods:
-    """Test list_projects() and get_current_project()."""
+    """Test list_projects() and get_current_project().
+
+    @contract: All tests use mocked httpx.Client
+    @desc: Tests project listing, current project retrieval, error handling,
+           and project name extraction from worktree path.
+    @tags: test, client, project
+    """
 
     @patch("httpx.Client")
     def test_list_projects(self, mock_client_class):

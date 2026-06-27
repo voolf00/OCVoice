@@ -1,7 +1,10 @@
 """Floating overlay window for OCVoice.
 
-Shows live voice recognition status as a semi-transparent window
-that floats above other applications.
+@contract: Shows live voice recognition status as a semi-transparent overlay
+@desc: tkinter-based floating window that shows recognized speech, AI responses,
+       and current listening status. Auto-hides after 5 seconds of inactivity.
+       Runs in its own thread to avoid blocking the daemon main loop.
+@tags: ui, overlay, gui
 """
 
 import sys
@@ -17,7 +20,15 @@ except ImportError:
 
 
 class VoiceOverlay:
-    """Semi-transparent floating window showing voice status."""
+    """Semi-transparent floating window showing voice status.
+
+    @contract: Auto-hides after 5s inactivity; shows recognition/response/error
+    @desc: Creates a topmost tkinter window with status icon and text label.
+           Supports show/hide, recognition display, response display,
+           listening indicator, and error display. Falls back to stderr print
+           if tkinter unavailable.
+    @tags: ui, overlay, gui
+    """
 
     def __init__(self):
         if not HAS_TKINTER:
@@ -185,7 +196,13 @@ class VoiceOverlay:
 
 
 class OverlayManager:
-    """Manages the overlay window lifecycle."""
+    """Manages the overlay window lifecycle in a background thread.
+
+    @contract: Provides thread-safe show/update/hide for VoiceOverlay
+    @desc: Starts VoiceOverlay in a daemon thread, provides convenience
+           methods for recognition, response, listening, and error display.
+    @tags: ui, overlay, lifecycle
+    """
 
     def __init__(self):
         self._overlay = VoiceOverlay()

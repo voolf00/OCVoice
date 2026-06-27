@@ -1,8 +1,10 @@
 """Intent parser — converts transcribed speech to structured commands.
 
-Two parsing strategies:
-1. Regex (fast, offline, rule-based) — default
-2. LLM (via OpenCode itself) — for complex/ambiguous phrases
+@contract: Parses text → structured ParsedCommand with intent, args, confidence
+@desc: Two parsing strategies — regex (fast, offline, rule-based) as default,
+       and LLM (via OpenCode) for complex/ambiguous phrases (stub).
+       Strips wake words, matches command patterns and message triggers.
+@tags: intent, parser, session, project, message, cli
 """
 
 import re
@@ -18,7 +20,13 @@ from .intents import (
 
 
 class ParsedCommand:
-    """Result of intent parsing."""
+    """Result of intent parsing with structured metadata.
+
+    @contract: Always has intent, text, confidence — never partial state
+    @desc: Carries the parsed intent enum, cleaned text, extracted arguments,
+           confidence score, and original raw text for debugging.
+    @tags: intent, parser
+    """
 
     def __init__(
         self,
@@ -43,7 +51,14 @@ class ParsedCommand:
 # Regex intent parser — RU + EN patterns
 
 class RegexIntentParser:
-    """Rule-based intent parser using regex patterns."""
+    """Rule-based intent parser using regex patterns.
+
+    @contract: Always returns a ParsedCommand (defaults to SEND_MESSAGE)
+    @desc: Compiles RU/EN regex patterns for known commands, strips wake words,
+           falls back to message trigger detection, then defaults to SEND_MESSAGE
+           with lower confidence.
+    @tags: intent, parser, regex
+    """
 
     def __init__(self, confidence_threshold: float = 0.7, language: str = "auto",
                  wake_words: list[str] | None = None):
@@ -73,11 +88,10 @@ class RegexIntentParser:
     def parse(self, text: str) -> ParsedCommand:
         """Parse text into a command.
 
-        Args:
-            text: Transcribed speech text (may be Russian or English).
-
-        Returns:
-            ParsedCommand with intent and extracted arguments.
+        @contract: Never raises; returns UNKNOWN intent on empty text
+        @param text: Transcribed speech (Russian or English)
+        @returns: ParsedCommand with best-guess intent and arguments
+        @tags: intent, parser
         """
         text = text.strip().lower()
         if not text:
@@ -221,7 +235,14 @@ class RegexIntentParser:
 # Master parser with model/mode alias resolution
 
 class IntentParser:
-    """Main intent parser with configurable strategy."""
+    """Main intent parser with configurable strategy and alias resolution.
+
+    @contract: Returns normalized ParsedCommand with resolved model/mode aliases
+    @desc: Wraps RegexIntentParser, applies normalization (model name aliases,
+           mode name resolution, thinking toggle detection). Supports "regex"
+           and "llm" parser types.
+    @tags: intent, parser, model, agent
+    """
 
     # Maps intents to expected argument names
     ARGUMENT_NAMES = {

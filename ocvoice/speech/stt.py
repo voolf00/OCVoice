@@ -1,10 +1,10 @@
 """Speech-to-Text module.
 
-Supports two backends:
-1. Local: faster-whisper (CTranslate2-based Whisper) — offline, fast
-2. API: OpenAI Whisper API — cloud, highest accuracy
-
-Operates in "auto" mode by default: local first, API fallback.
+@contract: Transcribes audio to text via local or cloud backends
+@desc: Supports faster-whisper (local, CTranslate2-based Whisper) and
+       OpenAI Whisper API (cloud). Operates in "auto" mode by default:
+       local first with transparent API fallback on failure.
+@tags: speech, stt, whisper, api
 """
 
 import io
@@ -41,7 +41,14 @@ MODEL_SIZES = {
 
 
 class LocalSTT:
-    """Speech-to-text using faster-whisper (local inference)."""
+    """Speech-to-text using faster-whisper (local inference).
+
+    @contract: Returns transcribed text with confidence score
+    @desc: Wraps faster-whisper (CTranslate2) for offline Whisper inference.
+           Lazy-loads model on first transcribe call. Supports all model sizes
+           from tiny to large-v3.
+    @tags: speech, stt, whisper, local
+    """
 
     def __init__(
         self,
@@ -90,12 +97,11 @@ class LocalSTT:
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> dict:
         """Transcribe audio to text.
 
-        Args:
-            audio: float32 numpy array of audio samples.
-            sample_rate: audio sample rate.
-
-        Returns:
-            dict with keys: text, language, confidence, backend
+        @contract: Returns valid dict even on empty audio
+        @param audio: float32 samples
+        @param sample_rate: Audio sample rate (default 16000)
+        @returns: dict with keys: text, language, confidence, backend
+        @tags: speech, stt
         """
         self._ensure_model()
 
@@ -137,7 +143,13 @@ class LocalSTT:
 
 
 class API_STT:
-    """Speech-to-text using OpenAI Whisper API."""
+    """Speech-to-text using OpenAI Whisper API.
+
+    @contract: Returns transcribed text via cloud API
+    @desc: Wraps OpenAI's Whisper API for cloud-based transcription.
+           Converts float32 audio to 16-bit PCM WAV in memory before upload.
+    @tags: speech, stt, whisper, api, openai
+    """
 
     def __init__(self, api_key: str = ""):
         if not HAS_OPENAI:
@@ -160,12 +172,10 @@ class API_STT:
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> dict:
         """Transcribe audio using OpenAI Whisper API.
 
-        Args:
-            audio: float32 numpy array.
-            sample_rate: audio sample rate.
-
-        Returns:
-            dict with keys: text, language, confidence, backend
+        @param audio: float32 samples
+        @param sample_rate: Audio sample rate (default 16000)
+        @returns: dict with keys: text, language, confidence, backend
+        @tags: speech, stt, api
         """
         self._ensure_client()
 
@@ -203,7 +213,10 @@ class API_STT:
 class SpeechToText:
     """Unified Speech-to-Text interface.
 
-    Handles backend selection, fallback logic, and result normalization.
+    @contract: Provides consistent transcribe() API across all backends
+    @desc: Handles backend selection ("local", "api", "auto"), fallback logic
+           (local → API on failure), and result normalization.
+    @tags: speech, stt, whisper
     """
 
     def __init__(
@@ -247,7 +260,11 @@ class SpeechToText:
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> dict:
         """Transcribe audio to text.
 
-        Returns dict: {text, language, confidence, backend}
+        @contract: Returns result dict with text, language, confidence, backend
+        @param audio: float32 samples
+        @param sample_rate: Audio sample rate (default 16000)
+        @returns: dict with keys: text, language, confidence, backend
+        @tags: speech, stt
         """
         if len(audio) == 0:
             return {"text": "", "language": "", "confidence": 0.0, "backend": "none"}

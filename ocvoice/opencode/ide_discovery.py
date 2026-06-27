@@ -1,6 +1,9 @@
 """OpenCode IDE auto-discovery.
 
-Finds the running OpenCode Desktop IDE or CLI server credentials.
+@contract: Finds running OpenCode server via port scanning
+@desc: Scans known ports and running process list to discover OpenCode Desktop
+       IDE or CLI server. Provides base_url and auth credentials for the client.
+@tags: discovery, network, client
 """
 
 import os
@@ -8,7 +11,13 @@ from typing import Optional
 
 
 class IDEDiscovery:
-    """Discovers the OpenCode server credentials."""
+    """Discovers the OpenCode server credentials.
+
+    @contract: Returns found=True only when a valid /session endpoint responds
+    @desc: Uses lsof to find ports from running opencode processes, then
+           probes known ports. Handles optional HTTP basic auth from env vars.
+    @tags: discovery, network
+    """
 
     # Common OpenCode server ports — scan wider range
     KNOWN_PORTS = [4096, 59499, 59000, 59001, 59002, 59010, 59020, 59030, 59040, 59050,
@@ -21,7 +30,12 @@ class IDEDiscovery:
         self.password: Optional[str] = None
 
     def discover(self) -> bool:
-        """Try to find the IDE/CLI server. Returns True if found."""
+        """Try to find the IDE/CLI server.
+
+        @contract: Sets self.port on success; idempotent
+        @returns: True if a responding OpenCode server was found
+        @tags: discovery, network
+        """
         self.password = os.environ.get("OPENCODE_SERVER_PASSWORD", "") or os.environ.get("OPENCODE_SERVER_PASSWORD", "")
         self.username = os.environ.get("OPENCODE_SERVER_USERNAME", "opencode")
 
