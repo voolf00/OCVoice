@@ -390,6 +390,18 @@ class SettingsWindow:
         )
         self.en_voice_menu.pack(anchor="w", pady=(2, 10))
 
+        # ─── OpenCode section ───
+        ctk.CTkLabel(scroll, text="🔗 OpenCode", anchor="w",
+                      font=ctk.CTkFont(size=14, weight="bold")).pack(fill="x", pady=(15, 4))
+        ctk.CTkLabel(scroll, text="Desktop server port (0 = auto-detect)",
+                      anchor="w", font=ctk.CTkFont(size=12)).pack(fill="x", pady=(2, 0))
+        self.desktop_port_entry = ctk.CTkEntry(scroll, height=35, placeholder_text="0")
+        dp_val = self.cfg.get("opencode", {}).get("desktop_port", 0)
+        self.desktop_port_entry.insert(0, str(dp_val) if dp_val else "0")
+        self.desktop_port_entry.pack(fill="x", pady=(4, 2))
+        ctk.CTkLabel(scroll, text="Оставьте 0 для авто-определения порта Desktop",
+                      anchor="w", font=ctk.CTkFont(size=11), text_color="#888888").pack(fill="x", pady=(0, 5))
+
         # ─── Help section ───
         ctk.CTkLabel(scroll, text="💡 How to use / Как пользоваться",
                       anchor="w", font=ctk.CTkFont(size=14, weight="bold")).pack(fill="x", pady=(15, 5))
@@ -676,6 +688,14 @@ class SettingsWindow:
         tt["max_length"] = int(self.tts_len_slider.get())
         tt["voice_ru"] = self.ru_voice_var.get().split(" —")[0]
         tt["voice_en"] = self.en_voice_var.get().split(" —")[0]
+
+        # OpenCode settings
+        opencode = self.cfg.setdefault("opencode", {})
+        try:
+            dp = int(self.desktop_port_entry.get().strip())
+            opencode["desktop_port"] = dp
+        except (ValueError, AttributeError):
+            opencode["desktop_port"] = 0
 
         _save_config(self.cfg)
         _send_reload_ipc()

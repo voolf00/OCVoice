@@ -63,6 +63,7 @@ speed = 1.0
 [opencode]
 host = "127.0.0.1"
 port = 4096
+desktop_port = 0
 auto_start = true
 default_model = "anthropic/claude-sonnet-4-5"
 default_agent = "build"
@@ -115,6 +116,7 @@ def _env_overrides(config: dict) -> dict:
         "OCVOICE_TTS_ENABLED": ("speech", "tts", "enabled", lambda v: v.lower() in ("true", "1", "yes")),
         "OCVOICE_OPENCODE_HOST": ("opencode", "host", str),
         "OCVOICE_OPENCODE_PORT": ("opencode", "port", int),
+        "OCVOICE_OPENCODE_DESKTOP_PORT": ("opencode", "desktop_port", int),
         "OCVOICE_OPENCODE_AUTO_START": ("opencode", "auto_start", lambda v: v.lower() in ("true", "1", "yes")),
         "OCVOICE_OPENCODE_MODEL": ("opencode", "default_model", str),
         "OCVOICE_OPENCODE_AGENT": ("opencode", "default_agent", str),
@@ -327,6 +329,9 @@ class Config:
 
     @property
     def opencode_port(self) -> int: return self.get("opencode", "port", default=4096)
+
+    @property
+    def opencode_desktop_port(self) -> int: return self.get("opencode", "desktop_port", default=0)
 
     @property
     def opencode_auto_start(self) -> bool: return self.get("opencode", "auto_start", default=True)

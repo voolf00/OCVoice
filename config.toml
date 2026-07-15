@@ -69,9 +69,12 @@ speed = 1.0
 [opencode]
 # OpenCode server host
 host = "127.0.0.1"
-# OpenCode server port
+# OpenCode server port (4096 = TUI, 0 = auto-detect Desktop)
 port = 4096
-# Automatically start opencode serve if not running
+# Desktop server port (0 = auto-detect, >0 = manual override)
+# Desktop typically runs on a higher port like 64398
+desktop_port = 0
+# Automatically start opencode serve if not running (TUI only)
 auto_start = true
 # Default model in provider/model format
 default_model = "anthropic/claude-sonnet-4-5"

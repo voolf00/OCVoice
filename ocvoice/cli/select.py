@@ -12,21 +12,23 @@ from .ipc import write_command
 
 
 def _discover_ide() -> tuple:
-    """Find OpenCode server, return (base_url, auth)."""
+    """Find OpenCode server, return (base_url, auth, prefix)."""
     from ..opencode.ide_discovery import IDEDiscovery
     ide = IDEDiscovery()
     if not ide.discover():
         print("❌ OpenCode server not found")
         print("   Make sure OpenCode Desktop is running")
         sys.exit(1)
-    return (ide.base_url, ide.auth)
+    return (ide.base_url, ide.auth, ide.prefix)
 
 
 def _get_client():
     """Return an OpenCodeClient connected to the discovered IDE."""
     from ..opencode.client import OpenCodeClient
-    url, auth = _discover_ide()
-    return OpenCodeClient(base_url=url, auth=auth)
+    url, auth, prefix = _discover_ide()
+    client = OpenCodeClient(base_url=url, auth=auth, prefix=prefix)
+    print(f"  🔗 {url} prefix='{prefix}'", flush=True)
+    return client
 
 
 def _send_command(cmd: str, **kwargs):

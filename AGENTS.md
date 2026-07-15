@@ -57,3 +57,27 @@ Speak commands in **Russian** or **English**.
 | `"дарвин, последняя сессия"` | Back to most recent |
 | `"дарвин, стоп"` | Pause listening |
 | `"дарвин, найди сервер"` | Rediscover IDE |
+
+## Desktop port detection
+
+OCVoice auto-detects the OpenCode Desktop server by:
+1. Scanning listening ports via `lsof`
+2. Checking which port serves HTML (Desktop web UI) at `/`
+3. Preferring the Desktop port over standalone `opencode serve`
+
+To override, set `desktop_port` in `~/.config/ocvoice/config.toml`:
+```toml
+[opencode]
+desktop_port = 64398
+```
+
+Or via environment variable: `OCVOICE_OPENCODE_DESKTOP_PORT=64398`
+
+If set to `0` (default), auto-detection is used.
+
+## Project session sync
+
+When you select a project (via tray, voice, or CLI), OCVoice finds the most recently
+updated session for that specific project. Sessions from other projects are ignored.<｜end▁of▁thinking｜>
+
+<｜｜DSML｜｜parameter name="description" string="true">Update AGENTS.md docs

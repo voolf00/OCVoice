@@ -49,6 +49,44 @@ class OpenCodeClient:
         self._prefix = prefix.rstrip("/")
         self._lock = threading.Lock()
 
+    def detect_prefix(self) -> str:
+        """Auto-detect correct API prefix by probing known endpoints.
+
+        @contract: Modifies self._prefix if a working endpoint is found
+        @desc: For each probe path, tries {path}/session first, then falls
+               back to just {path} (for Desktop where path IS the endpoint).
+        @returns: The detected prefix (unchanged if detection fails)
+        @tags: client, discovery
+        """
+        from .ide_discovery import IDEDiscovery
+        probes = IDEDiscovery.PROBE_PATHS
+        import httpx
+        auth = self._auth
+        for path in probes:
+            # Try {path}/session (e.g. /session/session)
+            try:
+                url = f"{self.base_url}{path}/session" if path else f"{self.base_url}/session"
+                r = httpx.get(url, auth=auth, timeout=2)
+                if r.status_code == 200:
+                    self._prefix = path
+                    print(f"[OpenCodeClient] Prefix detected: '{path}' (from {path}/session)", flush=True)
+                    return path
+            except Exception:
+                pass
+            # Fallback: try just {path} (e.g. /session)
+            if path:
+                try:
+                    url = f"{self.base_url}{path}"
+                    r = httpx.get(url, auth=auth, timeout=2)
+                    if r.status_code == 200:
+                        self._prefix = path
+                        print(f"[OpenCodeClient] Prefix detected: '{path}' (from bare path)", flush=True)
+                        return path
+                except Exception:
+                    continue
+        print(f"[OpenCodeClient] Prefix detection failed, keeping '{self._prefix}'", flush=True)
+        return self._prefix
+
     @property
     def client(self) -> httpx.Client:
         with self._lock:
@@ -234,6 +272,7 @@ class OpenCodeClient:
         """Send a text message to a session and wait for response.
 
         @contract: Blocks until AI response received (unless no_reply=True)
+                   Tries alternative prefixes if 404 is returned (fallback).
         @param text: Message content to send
         @param session_id: Target session (uses current if None)
         @param model: Model in provider/model format (e.g. "anthropic/claude-sonnet-4-5")
@@ -260,17 +299,41 @@ class OpenCodeClient:
         if no_reply:
             body["noReply"] = True
 
-        url = f"{self._prefix}/{sid}/message"
-        print(f"[OCVoice] 📡 POST {url}", flush=True)
-        print(f"[OCVoice] 📡 Body: {json.dumps(body, ensure_ascii=False)}", flush=True)
-        try:
-            r = self.client.post(url, json=body)
-            print(f"[OCVoice] 📡 Response: {r.status_code} {r.text[:500]}", flush=True)
-            r.raise_for_status()
-            return r.json()
-        except Exception as e:
-            print(f"[OCVoice] ❌ HTTP error: {e}", flush=True)
-            raise
+        # Try prefixes: current first, then fallbacks (/session → /api/session → "")
+        prefixes_to_try = [self._prefix]
+        from .ide_discovery import IDEDiscovery
+        for p in IDEDiscovery.PROBE_PATHS:
+            if p not in prefixes_to_try:
+                prefixes_to_try.append(p)
+
+        last_error = None
+        for pfx in prefixes_to_try:
+            url = f"{pfx}/{sid}/message"
+            print(f"[OCVoice] 📡 POST {self.base_url}{url}", flush=True)
+            print(f"[OCVoice] 📡 Body: {json.dumps(body, ensure_ascii=False)}", flush=True)
+            try:
+                r = self.client.post(url, json=body)
+                print(f"[OCVoice] 📡 Response: {r.status_code} {r.text[:500]}", flush=True)
+                if r.status_code == 404 and pfx != prefixes_to_try[-1]:
+                    print(f"[OCVoice] 🔄 Prefix '{pfx}' got 404, trying next...", flush=True)
+                    last_error = r.status_code
+                    continue
+                r.raise_for_status()
+                self._prefix = pfx  # Update prefix on success
+                return r.json()
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 404 and pfx != prefixes_to_try[-1]:
+                    print(f"[OCVoice] 🔄 Prefix '{pfx}' got 404, trying next...", flush=True)
+                    last_error = e
+                    continue
+                print(f"[OCVoice] ❌ HTTP error: {e}", flush=True)
+                raise
+            except Exception as e:
+                print(f"[OCVoice] ❌ HTTP error: {e}", flush=True)
+                raise
+
+        if last_error:
+            raise last_error if isinstance(last_error, Exception) else OpenCodeError(f"Send failed (tried {prefixes_to_try})")
 
     def send_prompt_async(self, text: str, session_id: str = None, model: str = None, agent: str = None) -> bool:
         """Send a message asynchronously (fire-and-forget)."""

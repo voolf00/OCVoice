@@ -92,8 +92,8 @@ class TestSessionPollerManualOverride:
 
         daemon._check_session_changes()
 
-        # Should NOT switch — poller only tracks timestamps, never changes session_id
-        assert daemon.client.session_id == "sess-old"
+        # Should switch to most recent user session when lock is expired
+        assert daemon.client.session_id == "sess-new"
 
     def test_poller_skipped_when_no_user_sessions(self):
         """When only state sessions exist, poller should skip."""

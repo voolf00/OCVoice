@@ -210,7 +210,7 @@ class VoiceDaemon:
         )
 
         ide = IDEDiscovery()
-        ide_found = ide.discover()
+        ide_found = ide.discover(preferred_port=self.config.opencode_desktop_port)
         
         if ide_found:
             print(f"[OCVoice] Found OpenCode server at {ide.base_url}")
@@ -231,8 +231,9 @@ class VoiceDaemon:
                 print("[OCVoice] WARNING: Could not start OpenCode server")
                 self.client = OpenCodeClient(base_url=self.config.opencode_base_url)
 
-        # Detect correct path prefix for this server
-        print(f"[OCVoice] 📡 Сервер: {str(self.client.client.base_url)}", flush=True)
+        # Detect correct path prefix for this server (Desktop vs TUI)
+        detected_prefix = self.client.detect_prefix()
+        print(f"[OCVoice] 📡 Сервер: {str(self.client.client.base_url)} prefix='{detected_prefix}'", flush=True)
 
         # ── Audio capture (auto-detect mic) ──
         device_id = self.config.audio_device
@@ -1306,6 +1307,7 @@ class VoiceDaemon:
 
         If target_port is given, connect to that specific port directly
         (used by CLI 'ocv select project'). Otherwise scan all ports.
+        @contract: Preserves manually selected session across reconnects
         """
         from .opencode.ide_discovery import IDEDiscovery
 
@@ -1313,7 +1315,8 @@ class VoiceDaemon:
             new_url = f"http://127.0.0.1:{target_port}"
             import httpx
             pw = os.environ.get("OPENCODE_SERVER_PASSWORD", "")
-            auth = ("opencode", pw) if pw else None
+            pw2 = os.environ.get("OPENCODE_PASSWORD", "")
+            auth = ("opencode", pw or pw2) if (pw or pw2) else None
             try:
                 r = httpx.get(f"{new_url}/session", auth=auth, timeout=2)
                 if r.status_code != 200:
@@ -1324,7 +1327,7 @@ class VoiceDaemon:
                 return False
         else:
             ide = IDEDiscovery()
-            if not ide.discover():
+            if not ide.discover(preferred_port=self.config.opencode_desktop_port):
                 return False
             new_url = ide.base_url.rstrip("/")
             auth = ide.auth
@@ -1333,6 +1336,10 @@ class VoiceDaemon:
         if new_url == current_url:
             return True
 
+        # Preserve current session and project selection across reconnect
+        old_session_id = self.client.session_id if self.client else None
+        old_project_worktree = self._selected_project_worktree
+
         print(f"[OCVoice] 🔄 Переключение на сервер: {new_url}", flush=True)
         self._beep(500, 0.12)
         time.sleep(0.08)
@@ -1340,61 +1347,166 @@ class VoiceDaemon:
         if self.client:
             self.client.close()
         self.client = OpenCodeClient(base_url=new_url, auth=auth)
+        # Auto-detect prefix for Desktop vs TUI
+        self.client.detect_prefix()
         self._state_session_id = None
         self._init_state_session()
-        self._select_user_session()
+
+        # Try to preserve manually selected session
+        if old_session_id and old_project_worktree:
+            self._select_user_session(project_worktree=old_project_worktree)
+            # If the same session ID still exists on the new server, keep it
+            if self.client and old_session_id:
+                try:
+                    self.client.get_session(old_session_id)
+                    self.client.session_id = old_session_id
+                    self._manual_session_until = time.time() + 60
+                    print(f"  📋 Сессия сохранена: {old_session_id[:16]}...", flush=True)
+                except Exception:
+                    print(f"  📋 Сессия {old_session_id[:16]}... недоступна на новом сервере", flush=True)
+        else:
+            self._select_user_session()
         return True
 
     def _select_user_session(self, project_worktree: str = ""):
-        """Find or create a valid session, then lock to it permanently.
+        """Find or create a valid session, sync with Desktop's active one.
 
         @param project_worktree: If set, only sessions in this project are considered.
-                                 If empty, any session is allowed (startup fallback).
         @contract: Sets self.client.session_id to a valid, API-confirmed session.
-                   Never auto-switches after this — _check_session_changes only
-                   tracks timestamps for AI response detection.
+                   Does NOT lock forever — _sync_desktop_session() will auto-switch
+                   to Desktop's most recent session when manual timeout expires.
+                   Always creates a new session if no valid user session exists,
+                   regardless of whether the old session_id is still set.
         """
         if not self.client:
             return
         try:
             sessions = self.client.list_sessions()
+
+            # Fill timestamp cache for all sessions (even if empty list)
+            if sessions:
+                for s in sessions:
+                    self._session_timestamps[s['id']] = s.get('time', {}).get('updated', 0)
+
+                # Filter: user sessions only (no OCVoice status)
+                user_sessions = [s for s in sessions
+                                 if 'OCVoice' not in s.get('title', '')
+                                 and s.get('id') != self._state_session_id]
+                if project_worktree:
+                    user_sessions = [s for s in user_sessions
+                                     if s.get('directory', '').startswith(project_worktree)]
+
+                # Pick the most recently updated session (user's current Desktop session)
+                candidate_id = None
+                for s in sorted(user_sessions, key=lambda s: s.get('time', {}).get('updated', 0), reverse=True):
+                    try:
+                        self.client.get_session(s['id'])
+                        candidate_id = s['id']
+                        break
+                    except Exception:
+                        continue
+
+                if candidate_id:
+                    self.client.session_id = candidate_id
+                    title = next((s.get('title', 'untitled') for s in user_sessions if s['id'] == candidate_id), 'untitled')
+                    print(f"  📋 Сессия: {title} ({candidate_id[:16]}...)", flush=True)
+                    self._manual_session_until = time.time() + 30
+                    return
+
+            # No valid user sessions found — try Desktop sync first
+            self._sync_desktop_session()
+            if self.client.session_id:
+                # Verify the current session is still valid
+                try:
+                    self.client.get_session(self.client.session_id)
+                    print(f"  📋 Сессия (sync): {self.client.session_id[:16]}...", flush=True)
+                    self._manual_session_until = time.time() + 30
+                    return
+                except Exception:
+                    print(f"  📋 Сессия {self.client.session_id[:16]}... устарела", flush=True)
+                    self.client.session_id = None
+
+            # No valid session — create a new one
+            label = "🎤 OCVoice" if not project_worktree else f"🎤 {project_worktree.rsplit('/', 1)[-1]}"
+            s = self.client.create_session(label)
+            if s and s.get('id'):
+                self.client.session_id = s['id']
+                print(f"  📋 Новая сессия: {s['id'][:16]}...", flush=True)
+            else:
+                print(f"  ❌ Не удалось создать сессию", flush=True)
+
+            self._manual_session_until = time.time() + 30
+        except Exception:
+            pass
+
+    def _sync_desktop_session(self):
+        """Sync with Desktop's active session.
+
+        @contract: Switches to the most recently updated user session for the
+                   selected project (if any). Does NOT switch if manual selection
+                   is still active (within 30s timeout).
+                   Force-switches when current session is stale (get_session fails).
+        @tags: daemon, session, sync, project
+        """
+        if not self.client:
+            return
+        if time.time() < self._manual_session_until:
+            return
+
+        try:
+            sessions = self.client.list_sessions()
+            if not sessions:
+                return
+
             user_sessions = [s for s in sessions
                              if 'OCVoice' not in s.get('title', '')
                              and s.get('id') != self._state_session_id]
-            if project_worktree:
-                user_sessions = [s for s in user_sessions
-                                 if s.get('directory', '').startswith(project_worktree)]
+            if not user_sessions:
+                return
 
-            # Fill timestamp cache for all sessions
-            for s in sessions:
-                self._session_timestamps[s['id']] = s.get('time', {}).get('updated', 0)
+            # If a project is selected, filter sessions for that project
+            wt = self._selected_project_worktree
+            if wt:
+                project_sessions = [s for s in user_sessions
+                                    if s.get('directory', '').startswith(wt)]
+                if project_sessions:
+                    user_sessions = project_sessions
 
-            # Try each matching session until we find one with a valid file on disk
-            candidate_id = None
-            for s in sorted(user_sessions, key=lambda s: s.get('time', {}).get('updated', 0), reverse=True):
+            # Find the most recently updated user session
+            latest = max(user_sessions, key=lambda s: s.get('time', {}).get('updated', 0))
+            latest_id = latest['id']
+
+            # Don't switch if we're already on that session
+            if self.client.session_id == latest_id:
+                return
+
+            # Verify the candidate session is valid
+            try:
+                self.client.get_session(latest_id)
+            except Exception:
+                return
+
+            # Check if current session is valid
+            current_valid = True
+            if self.client.session_id:
                 try:
-                    self.client.get_session(s['id'])
-                    candidate_id = s['id']
-                    break
+                    self.client.get_session(self.client.session_id)
                 except Exception:
-                    continue
+                    current_valid = False
 
-            if candidate_id:
-                self.client.session_id = candidate_id
-                title = next((s.get('title', 'untitled') for s in user_sessions if s['id'] == candidate_id), 'untitled')
-                print(f"  📋 Сессия: {title} ({candidate_id[:16]}...)", flush=True)
+            if not current_valid:
+                # Force switch — current session is stale
+                print(f"[OCVoice] 🔄 Desktop сессия (текущая невалидна): {latest.get('title', 'untitled')[:30]}...", flush=True)
+                self.client.session_id = latest_id
+                self._session_timestamps[latest_id] = latest.get('time', {}).get('updated', 0)
             else:
-                # No valid session — create a new one in the current project
-                label = "🎤 OCVoice" if not project_worktree else f"🎤 {project_worktree.rsplit('/', 1)[-1]}"
-                s = self.client.create_session(label)
-                if s and s.get('id'):
-                    self.client.session_id = s['id']
-                    print(f"  📋 Новая сессия: {s['id'][:16]}...", flush=True)
-                else:
-                    print(f"  ❌ Не удалось создать сессию", flush=True)
-
-            # Lock this session — no auto-switching
-            self._manual_session_until = float('inf')
+                # Normal switch — only if Desktop session is newer
+                latest_updated = latest.get('time', {}).get('updated', 0)
+                current_updated = self._session_timestamps.get(self.client.session_id, 0)
+                if latest_updated > current_updated:
+                    print(f"[OCVoice] 🔄 Desktop активная сессия: {latest.get('title', 'untitled')[:30]}...", flush=True)
+                    self.client.session_id = latest_id
+                    self._session_timestamps[latest_id] = latest_updated
         except Exception:
             pass
 
@@ -1732,19 +1844,24 @@ class VoiceDaemon:
         scan_ports = sorted(set(
             IDEDiscovery.KNOWN_PORTS + ide._scan_running_ports()
         ))
-        pw = os.environ.get("OPENCODE_SERVER_PASSWORD", "")
+        pw1 = os.environ.get("OPENCODE_SERVER_PASSWORD", "")
+        pw2 = os.environ.get("OPENCODE_PASSWORD", "")
+        pw = pw1 or pw2
         auth = ("opencode", pw) if pw else None
 
         for port in scan_ports:
-            try:
-                r = httpx.get(f"http://127.0.0.1:{port}/project", auth=auth, timeout=1.5)
-                if r.status_code != 200:
+            # Try each known prefix
+            for path in IDEDiscovery.PROBE_PATHS:
+                try:
+                    url = f"http://127.0.0.1:{port}{path}/project" if path else f"http://127.0.0.1:{port}/project"
+                    r = httpx.get(url, auth=auth, timeout=1.5)
+                    if r.status_code != 200:
+                        continue
+                    for p in r.json():
+                        if p.get('worktree') == worktree:
+                            return port
+                except Exception:
                     continue
-                for p in r.json():
-                    if p.get('worktree') == worktree:
-                        return port
-            except Exception:
-                pass
         return None
 
     def _extract_port(self) -> int:
@@ -1758,12 +1875,13 @@ class VoiceDaemon:
             return 0
 
     def _check_session_changes(self):
-        """Poll sessions; detect AI response completion.
+        """Poll sessions; detect AI response + sync with Desktop.
 
-        @contract: NEVER auto-switches sessions — only tracks timestamps
-        @desc: When awaiting AI response, checks if session updated.
-               Session selection is ONLY done by _select_user_session() or
-               explicit user action (voice command / tray menu).
+        @contract: Syncs with Desktop's most recent session when manual
+                   timeout expires. NEVER switches if user manually selected
+                   a session within the last 30 seconds.
+        @desc: When awaiting AI response, checks if current session updated.
+               Periodically syncs with Desktop's active session.
         """
         if not self.client:
             return
@@ -1784,15 +1902,19 @@ class VoiceDaemon:
                             print(f"  ✅ AI ответил", flush=True)
                             self._set_state("waiting")
                         break
-                return
+            # Periodically sync with Desktop's active session
+            elif time.time() >= self._manual_session_until:
+                self._sync_desktop_session()
         except Exception:
             pass
 
     def _send_message(self, text: str):
-        """Send a message via REST API to the locked session.
+        """Send a message via REST API to the currently active session.
 
-        @contract: Sends to self.client.session_id (locked, never auto-switched).
+        @contract: Syncs with Desktop's active session before sending.
                    Retries ONCE with fresh session selection on ENOENT.
+                   Notifies user on errors via desktop notification + tray.
+        @tags: daemon, message, notification, session
         """
         if not text:
             return
@@ -1800,18 +1922,33 @@ class VoiceDaemon:
         # Sync model/agent from Desktop before sending (user may have changed it)
         self._sync_config_from_server()
 
+        # Sync with Desktop's active session before sending
+        self._sync_desktop_session()
+
         print(f"\n{'─'*50}", flush=True)
         print(f"  🤖 Отправляю в OpenCode [{self._current_agent}]...", flush=True)
 
-        if not self.client or not self.client.session_id:
-            print(f"[OCVoice] ❌ Нет сессии для отправки", flush=True)
+        if not self.client:
+            msg = "Нет соединения с OpenCode"
+            print(f"[OCVoice] ❌ {msg}", flush=True)
+            self._notify("OCVoice ❌", msg)
+            return
+
+        if not self.client.session_id:
+            msg = "Нет сессии для отправки"
+            print(f"[OCVoice] ❌ {msg}", flush=True)
+            self._notify("OCVoice ❌", f"{msg}. Выберите сессию в меню.")
             return
 
         # Validate session_id is a user session, not the state session
         if self._state_session_id and self.client.session_id == self._state_session_id:
-            print(f"[OCVoice] ❌ session_id указывает на статусную сессию! "
-                  f"id={self.client.session_id[:16]}...", flush=True)
+            msg = f"session_id указывает на статусную сессию! id={self.client.session_id[:16]}..."
+            print(f"[OCVoice] ❌ {msg}", flush=True)
+            self._notify("OCVoice ❌", "Ошибка: выбрана статусная сессия. Выберите другую.")
             return
+
+        url_str = f"{self.client.client.base_url}/{self.client.session_id[:16]}.../message"
+        print(f"  🔗 {url_str}", flush=True)
 
         for attempt in range(2):
             try:
@@ -1837,13 +1974,26 @@ class VoiceDaemon:
                 err_body = getattr(e, 'response', None)
                 err_text = err_body.text if err_body is not None else ''
                 if attempt == 0 and ("ENOENT" in err_text or "no such file" in err_text.lower()):
-                    print(f"  ⚠️ Сессия устарела ({sid[:16]}...), обновляю...", flush=True)
+                    print(f"  ⚠️ Сессия устарела ({sid[:16]}...), ищу Desktop-сессию...", flush=True)
+                    # First try to sync with Desktop's active session
+                    self._sync_desktop_session()
+                    sid = self.client.session_id
+                    if sid and sid != getattr(self, '_state_session_id', None):
+                        try:
+                            self.client.get_session(sid)
+                            print(f"  📋 Desktop-сессия: {sid[:16]}...", flush=True)
+                            continue
+                        except Exception:
+                            pass
+                    # Fallback: create a new session
                     self._select_user_session(project_worktree=self._selected_project_worktree)
                     sid = self.client.session_id
                     if sid:
                         print(f"  📋 Новая сессия: {sid[:16]}...", flush=True)
                         continue
-                print(f"  ❌ Ошибка отправки: {e}", flush=True)
+                err_msg = f"Ошибка отправки: {e}"
+                print(f"  ❌ {err_msg}", flush=True)
+                self._notify("OCVoice ❌", f"Сообщение не отправлено: {e}")
                 self._set_state("waiting")
                 break
 
@@ -2036,19 +2186,35 @@ class VoiceDaemon:
         self._running = False
 
     def _on_tray_select_session(self, session_id: str):
-        """Handle session selection from tray menu."""
+        """Handle session selection from tray menu.
+
+        @contract: Verifies session exists before switching. If session is
+                   invalid, falls back to Desktop sync instead of using it.
+        @tags: daemon, session, tray
+        """
         if not self.client:
             return
-        self.client.session_id = session_id
-        self._manual_session_until = time.time() + 30
-        self._beep(880, 0.1)
         title = "?"
+        valid = False
         try:
             s = self.client.get_session(session_id)
-            title = s.get('title', '?')[:40]
+            if s and s.get('id'):
+                title = s.get('title', '?')[:40]
+                valid = True
         except Exception:
             pass
-        print(f"[OCVoice] 📋 Tray: переключено на сессию '{title}'", flush=True)
+        if valid:
+            self.client.session_id = session_id
+            self._manual_session_until = time.time() + 30
+            self._beep(880, 0.1)
+            print(f"[OCVoice] 📋 Tray: переключено на сессию '{title}'", flush=True)
+        else:
+            print(f"[OCVoice] ⚠️ Tray: сессия {session_id[:16]}... недоступна, синхронизирую с Desktop", flush=True)
+            self._sync_desktop_session()
+            if self.client.session_id:
+                self._manual_session_until = time.time() + 15
+                self._beep(660, 0.1)
+                print(f"[OCVoice] 🔄 Tray: переключено на Desktop-сессию {self.client.session_id[:16]}...", flush=True)
 
     def _on_tray_find_server(self, target_port=None):
         """Handle 'Find Server' from tray/menubar menu."""
