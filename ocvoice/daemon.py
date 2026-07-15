@@ -133,6 +133,9 @@ class VoiceDaemon:
                 self._session_timestamps[self.client.session_id] = s.get('time', {}).get('updated', 0)
             except Exception as e:
                 self._debug_log("Failed to save session timestamp", e)
+                err_body = getattr(e, 'response', None)
+                if err_body is not None and "ENOENT" in err_body.text:
+                    self._select_user_session()
 
         state_map = {
             "waiting":   ("🟢", "ожидает"),
@@ -1780,12 +1783,12 @@ class VoiceDaemon:
                   f"id={self.client.session_id[:16]}...", flush=True)
             return
 
-        sid = self.client.session_id
-        print(f"  📋 Сессия: {sid[:16]}...", flush=True)
-
         for attempt in range(2):
             try:
                 self._set_state("awaiting")
+                sid = self.client.session_id
+                if attempt == 0:
+                    print(f"  📋 Сессия: {sid[:16]}...", flush=True)
                 response = self.client.send_message(
                     text=text,
                     agent=self._current_agent,
@@ -1804,8 +1807,9 @@ class VoiceDaemon:
                 self._set_state("waiting")
                 break
             except Exception as e:
-                err_str = str(e)
-                if attempt == 0 and ("ENOENT" in err_str or "no such file" in err_str.lower()):
+                err_body = getattr(e, 'response', None)
+                err_text = err_body.text if err_body is not None else ''
+                if attempt == 0 and ("ENOENT" in err_text or "no such file" in err_text.lower()):
                     print(f"  ⚠️ Сессия устарела ({sid[:16]}...), обновляю...", flush=True)
                     self._select_user_session()
                     sid = self.client.session_id
