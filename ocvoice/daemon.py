@@ -135,7 +135,7 @@ class VoiceDaemon:
                 self._debug_log("Failed to save session timestamp", e)
                 err_body = getattr(e, 'response', None)
                 if err_body is not None and "ENOENT" in err_body.text:
-                    self._select_user_session()
+                    self._select_user_session(project_worktree=self._selected_project_worktree)
 
         state_map = {
             "waiting":   ("🟢", "ожидает"),
@@ -1345,10 +1345,13 @@ class VoiceDaemon:
         return True
 
     def _select_user_session(self, project_worktree: str = ""):
-        """Select the most recently updated user session and fill timestamp cache.
+        """Find or create a valid session, then lock to it permanently.
 
-        @param project_worktree: If set, only sessions in this project are considered
-        @contract: Always sets self.client.session_id to a valid session
+        @param project_worktree: If set, only sessions in this project are considered.
+                                 If empty, any session is allowed (startup fallback).
+        @contract: Sets self.client.session_id to a valid, API-confirmed session.
+                   Never auto-switches after this — _check_session_changes only
+                   tracks timestamps for AI response detection.
         """
         if not self.client:
             return
@@ -1357,22 +1360,40 @@ class VoiceDaemon:
             user_sessions = [s for s in sessions
                              if 'OCVoice' not in s.get('title', '')
                              and s.get('id') != self._state_session_id]
-            # Filter by project if specified
             if project_worktree:
                 user_sessions = [s for s in user_sessions
                                  if s.get('directory', '').startswith(project_worktree)]
-            # Fill timestamp cache for all user sessions
+
+            # Fill timestamp cache for all sessions
             for s in sessions:
                 self._session_timestamps[s['id']] = s.get('time', {}).get('updated', 0)
-            if user_sessions:
-                latest = max(user_sessions, key=lambda s: s.get('time', {}).get('updated', 0))
-                self.client.session_id = latest['id']
-                title = latest.get('title', 'untitled')
-                print(f"  📋 Сессия: {title} ({latest['id'][:16]}...)", flush=True)
+
+            # Try each matching session until we find one with a valid file on disk
+            candidate_id = None
+            for s in sorted(user_sessions, key=lambda s: s.get('time', {}).get('updated', 0), reverse=True):
+                try:
+                    self.client.get_session(s['id'])
+                    candidate_id = s['id']
+                    break
+                except Exception:
+                    continue
+
+            if candidate_id:
+                self.client.session_id = candidate_id
+                title = next((s.get('title', 'untitled') for s in user_sessions if s['id'] == candidate_id), 'untitled')
+                print(f"  📋 Сессия: {title} ({candidate_id[:16]}...)", flush=True)
             else:
-                s = self.client.create_session("Новый проект")
-                self.client.session_id = s.get('id')
-                print(f"  📋 Новая сессия: {s.get('id', '?')[:16]}...", flush=True)
+                # No valid session — create a new one in the current project
+                label = "🎤 OCVoice" if not project_worktree else f"🎤 {project_worktree.rsplit('/', 1)[-1]}"
+                s = self.client.create_session(label)
+                if s and s.get('id'):
+                    self.client.session_id = s['id']
+                    print(f"  📋 Новая сессия: {s['id'][:16]}...", flush=True)
+                else:
+                    print(f"  ❌ Не удалось создать сессию", flush=True)
+
+            # Lock this session — no auto-switching
+            self._manual_session_until = float('inf')
         except Exception:
             pass
 
@@ -1707,7 +1728,13 @@ class VoiceDaemon:
             return 0
 
     def _check_session_changes(self):
-        """List sessions; if awaiting AI response, detect completion and reset."""
+        """Poll sessions; detect AI response completion.
+
+        @contract: NEVER auto-switches sessions — only tracks timestamps
+        @desc: When awaiting AI response, checks if session updated.
+               Session selection is ONLY done by _select_user_session() or
+               explicit user action (voice command / tray menu).
+        """
         if not self.client:
             return
         try:
@@ -1728,67 +1755,43 @@ class VoiceDaemon:
                             self._set_state("waiting")
                         break
                 return
-
-            if time.time() < self._manual_session_until:
-                return
-
-            user_sessions = [s for s in sessions
-                             if 'OCVoice' not in s.get('title', '')
-                             and s.get('id') != self._state_session_id]
-            if not user_sessions:
-                return
-
-            latest = max(user_sessions, key=lambda s: s.get('time', {}).get('updated', 0))
-            latest_updated = latest.get('time', {}).get('updated', 0)
-
-            if latest['id'] != current_id:
-                current_updated = 0
-                for s in user_sessions:
-                    if s['id'] == current_id:
-                        current_updated = s.get('time', {}).get('updated', 0)
-                        break
-                if latest_updated > current_updated:
-                    # Only auto-switch if no project is selected, or session belongs to selected project
-                    selected = self._selected_project_worktree
-                    if not selected:
-                        # No project selected — switch freely
-                        pass
-                    else:
-                        # Project selected — only switch if newer session is in the same project
-                        # Check directory field: starts with selected worktree
-                        latest_dir = latest.get('directory', '')
-                        current_dir = ''
-                        for s in user_sessions:
-                            if s['id'] == current_id:
-                                current_dir = s.get('directory', '')
-                                break
-                        if not (latest_dir.startswith(selected) or latest_dir == os.path.expanduser("~")):
-                            # Newer session is NOT in the selected project — don't switch
-                            latest_updated = 0  # Prevent switch
-                    if latest_updated > current_updated:
-                        title = latest.get('title', 'untitled')
-                        self._beep(660, 0.1)
-                        print(f"  📋 Переключение на сессию: {title} ({latest['id'][:16]}...)", flush=True)
-                        self.client.session_id = latest['id']
         except Exception:
             pass
 
     def _send_message(self, text: str):
-        """Send a message to the active user session (sync, waits for response)."""
+        """Send a message — tries TUI/Desktop prompt first, then REST API fallback.
+
+        @contract: TUI approach (append+submit) makes message visible in Desktop UI.
+                   REST API fallback ensures message is stored in the session.
+        """
         if not text:
             return
 
         print(f"\n{'─'*50}", flush=True)
         print(f"  🤖 Отправляю в OpenCode [{self._current_agent}]...", flush=True)
 
-        if not self.client or not self.client.session_id:
-            print(f"[OCVoice] ❌ Нет сессии для отправки", flush=True)
-            return
-
         # Validate session_id is a user session, not the state session
-        if self._state_session_id and self.client.session_id == self._state_session_id:
+        if self._state_session_id and self.client and self.client.session_id == self._state_session_id:
             print(f"[OCVoice] ❌ session_id указывает на статусную сессию! "
                   f"id={self.client.session_id[:16]}...", flush=True)
+            return
+
+        # Route 1: TUI/Desktop prompt (visible in Desktop UI)
+        try:
+            self._set_state("awaiting")
+            self.client.tui_append_prompt(text)
+            self.client.tui_submit_prompt()
+            print(f"  ✅ Отправлено через TUI/Desktop", flush=True)
+            self._set_state("waiting")
+            print(f"{'─'*50}\n", flush=True)
+            return
+        except Exception as e:
+            print(f"  ⚠️ TUI отправка не удалась ({e}), пробую REST API...", flush=True)
+
+        # Route 2: REST API (fallback — requires valid session_id)
+        if not self.client or not self.client.session_id:
+            print(f"[OCVoice] ❌ Нет сессии для REST API", flush=True)
+            print(f"{'─'*50}\n", flush=True)
             return
 
         for attempt in range(2):
@@ -1796,7 +1799,7 @@ class VoiceDaemon:
                 self._set_state("awaiting")
                 sid = self.client.session_id
                 if attempt == 0:
-                    print(f"  📋 Сессия: {sid[:16]}...", flush=True)
+                    print(f"  📋 REST-сессия: {sid[:16]}...", flush=True)
                 response = self.client.send_message(text=text)
                 response_text = self._extract_response_text(response)
                 if response_text:
@@ -2060,43 +2063,23 @@ class VoiceDaemon:
         self._beep(660, 0.1)
 
     def _on_tray_select_project(self, worktree: str):
-        """Handle project selection from tray/menubar menu."""
+        """Handle project selection from tray/menubar menu.
+
+        @contract: Selects a valid API-confirmed session for the project.
+                   Never reads from local DB — avoids stale session files.
+        """
         if not worktree:
             return
         name = worktree.rsplit('/', 1)[-1]
         print(f"[OCVoice] 📁 Выбран проект: {name} ({worktree})", flush=True)
         self._selected_project_worktree = worktree
-        self._manual_session_until = float('inf')
 
         if not self.client:
             print(f"  ❌ Нет соединения с OpenCode", flush=True)
             self._update_ui_menu()
             return
 
-        # Pick the most recent session for this project from DB
-        sessions = self._read_opencode_db_sessions(worktree)
-        if sessions:
-            latest = max(sessions, key=lambda s: s.get('time', {}).get('updated', 0))
-            session_id = latest['id']
-            self.client.session_id = session_id
-            print(f"  📋 Сессия: {latest.get('title', 'untitled')[:40]} ({session_id[:20]}...)", flush=True)
-        else:
-            # Fallback: create a new session for this project
-            print(f"  ⚠️ Нет сессий для {name}, создаю новую...", flush=True)
-            try:
-                s = self.client.create_session(f"🎤 {name}")
-                if s and s.get('id'):
-                    self.client.session_id = s['id']
-                    print(f"  📋 Создана новая сессия ({s['id'][:20]}...)", flush=True)
-            except Exception as e:
-                print(f"  ❌ Не удалось создать сессию: {e}", flush=True)
-
-        # Validate the selected session is accessible via API
-        try:
-            self.client.get_session(self.client.session_id)
-        except Exception:
-            print(f"  ⚠️ Сессия недоступна, ищу валидную в проекте {name}...", flush=True)
-            self._select_user_session(project_worktree=worktree)
+        self._select_user_session(project_worktree=worktree)
 
         self._set_state("waiting")
         self._update_ui_menu()

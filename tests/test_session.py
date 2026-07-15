@@ -71,8 +71,8 @@ class TestSessionPollerManualOverride:
         # Should NOT have switched to sess-new
         assert daemon.client.session_id == "sess-old"
 
-    def test_poller_switches_after_timeout(self):
-        """After manual lock expires, poller should switch to newer session."""
+    def test_poller_does_not_switch_sessions(self):
+        """Poller should NEVER auto-switch sessions — only tracks AI response."""
         config = MagicMock()
         config.opencode_default_model = "test/model"
         config.opencode_default_agent = "build"
@@ -92,8 +92,8 @@ class TestSessionPollerManualOverride:
 
         daemon._check_session_changes()
 
-        # Should switch to sess-new (newer updated)
-        assert daemon.client.session_id == "sess-new"
+        # Should NOT switch — poller only tracks timestamps, never changes session_id
+        assert daemon.client.session_id == "sess-old"
 
     def test_poller_skipped_when_no_user_sessions(self):
         """When only state sessions exist, poller should skip."""
