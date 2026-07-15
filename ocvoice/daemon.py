@@ -1783,29 +1783,40 @@ class VoiceDaemon:
         sid = self.client.session_id
         print(f"  📋 Сессия: {sid[:16]}...", flush=True)
 
-        try:
-            self._set_state("awaiting")
-            response = self.client.send_message(
-                text=text,
-                agent=self._current_agent,
-            )
-            response_text = self._extract_response_text(response)
-            if response_text:
-                print(f"  ✅ Ответ:", flush=True)
-                for line in response_text[:600].split('\n'):
-                    print(f"  │ {line}", flush=True)
-                self._show_response(response_text)
-            else:
-                print(f"  ⚠️ Пустой ответ от модели", flush=True)
+        for attempt in range(2):
+            try:
+                self._set_state("awaiting")
+                response = self.client.send_message(
+                    text=text,
+                    agent=self._current_agent,
+                )
+                response_text = self._extract_response_text(response)
+                if response_text:
+                    print(f"  ✅ Ответ:", flush=True)
+                    for line in response_text[:600].split('\n'):
+                        print(f"  │ {line}", flush=True)
+                    self._show_response(response_text)
+                else:
+                    print(f"  ⚠️ Пустой ответ от модели", flush=True)
 
-            if response_text and self.config.tts_enabled:
-                self._speak_response(response_text)
-            self._set_state("waiting")
-        except Exception as e:
-            print(f"  ❌ Ошибка отправки: {e}", flush=True)
-            self._set_state("waiting")
-        finally:
-            print(f"{'─'*50}\n", flush=True)
+                if response_text and self.config.tts_enabled:
+                    self._speak_response(response_text)
+                self._set_state("waiting")
+                break
+            except Exception as e:
+                err_str = str(e)
+                if attempt == 0 and ("ENOENT" in err_str or "no such file" in err_str.lower()):
+                    print(f"  ⚠️ Сессия устарела ({sid[:16]}...), обновляю...", flush=True)
+                    self._select_user_session()
+                    sid = self.client.session_id
+                    if sid:
+                        print(f"  📋 Новая сессия: {sid[:16]}...", flush=True)
+                        continue
+                print(f"  ❌ Ошибка отправки: {e}", flush=True)
+                self._set_state("waiting")
+                break
+
+        print(f"{'─'*50}\n", flush=True)
 
     def _extract_response_text(self, response: dict) -> str:
         """Extract readable text from OpenCode response."""
