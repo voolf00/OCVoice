@@ -1404,12 +1404,26 @@ class VoiceDaemon:
             return
         try:
             cfg = self.client.get_config()
-            server_model = cfg.get('model', '')
-            server_agent = cfg.get('default_agent', '')
+            # Try direct fields first, then probe provider models
+            server_model = cfg.get('model', '') or ''
+            if not server_model:
+                for pid, pdata in cfg.get('provider', {}).items():
+                    for mid in pdata.get('models', {}):
+                        if mid == cfg.get('default_model', ''):
+                            server_model = f"{pid}/{mid}"
+                            break
+                    if server_model:
+                        break
+                if not server_model and cfg.get('provider'):
+                    # Take the first available model
+                    for pid, pdata in cfg.get('provider', {}).items():
+                        for mid in pdata.get('models', {}):
+                            server_model = f"{pid}/{mid}"
+                            break
+                        if server_model:
+                            break
             if server_model:
                 self._current_model = server_model
-            if server_agent:
-                self._current_agent = server_agent
         except Exception:
             pass
 
@@ -1782,6 +1796,9 @@ class VoiceDaemon:
         """
         if not text:
             return
+
+        # Sync model/agent from Desktop before sending (user may have changed it)
+        self._sync_config_from_server()
 
         print(f"\n{'─'*50}", flush=True)
         print(f"  🤖 Отправляю в OpenCode [{self._current_agent}]...", flush=True)
