@@ -748,39 +748,21 @@ class VoiceDaemon:
         return False
 
     def _execute_command_from_text(self, text: str):
-        """Execute a command from transcribed text (CMD path)."""
+        """Execute a command from transcribed text (CMD path).
+
+        @contract: Routes all intents through _execute_command for unified handling
+        @desc: Parses text and delegates to _execute_command for execution.
+               All intent types (including SEND_MESSAGE) go through the same
+               path to ensure consistent connection checks and logging.
+        @tags: daemon, intent, message
+        """
         from .intent.parser import IntentParser
         parser = IntentParser(parser_type=self.config.intent_parser,
                               wake_words=self.config.wake_words)
         cmd = parser.parse(text)
         print(f"[OCVoice] 🔍 Parser ({self.config.intent_parser}): \"{text}\" → {cmd.intent.name} conf={cmd.confidence}", flush=True)
-        if cmd.intent != Intent.SEND_MESSAGE and cmd.intent != Intent.UNKNOWN:
-            self._show_in_tui(text, cmd)
-            self._execute_command(cmd)
-            return
-
-        # SEND_MESSAGE — отправка с ожиданием ответа AI
-        if not self.client or not self.client.session_id:
-            print(f"[OCVoice] ❌ Нет сессии для отправки", flush=True)
-            self._set_state("waiting")
-            return
-
-        try:
-            response = self.client.send_message(text)
-            response_text = self._extract_response_text(response)
-            if response_text:
-                print(f"  ✅ Ответ AI:", flush=True)
-                for line in response_text[:600].split('\n'):
-                    print(f"  │ {line}", flush=True)
-                self._show_response(response_text)
-            else:
-                print(f"  ⚠️ AI вернул пустой ответ", flush=True)
-            if response_text and self.config.tts_enabled:
-                self._speak_response(response_text)
-            self._set_state("waiting")
-        except Exception as e:
-            print(f"[OCVoice] ❌ Ошибка отправки: {e}", flush=True)
-            self._set_state("waiting")
+        self._show_in_tui(text, cmd)
+        self._execute_command(cmd)
 
     def _process_always_on_mode(self, chunk: np.ndarray):
         """Always-on mode: continuously listen and detect speech segments."""
@@ -1215,7 +1197,7 @@ class VoiceDaemon:
                     self._ensure_connected()
                     sessions = self.client.list_sessions()
                     user_sessions = [s for s in sessions
-                                     if '[OCVoice]' not in s.get('title', '')]
+                                     if 'OCVoice' not in s.get('title', '')]
                     print(f"[OCVoice] Сессии ({len(user_sessions)}):", flush=True)
                     for i, s in enumerate(user_sessions, 1):
                         marker = " ◄" if s.get('id') == self.client.session_id else ""
@@ -1226,7 +1208,7 @@ class VoiceDaemon:
                     query = command.arguments.get("session", command.text).strip().lower()
                     sessions = self.client.list_sessions()
                     user_sessions = [s for s in sessions
-                                     if '[OCVoice]' not in s.get('title', '')]
+                                     if 'OCVoice' not in s.get('title', '')]
                     titles = {s.get('title', '').lower()[:60]: s for s in user_sessions if s.get('title')}
                     # Fuzzy match
                     match = difflib.get_close_matches(query, list(titles.keys()), n=1, cutoff=0.4)
@@ -1366,7 +1348,7 @@ class VoiceDaemon:
         try:
             sessions = self.client.list_sessions()
             user_sessions = [s for s in sessions
-                             if '[OCVoice]' not in s.get('title', '')
+                             if 'OCVoice' not in s.get('title', '')
                              and s.get('id') != self._state_session_id]
             # Fill timestamp cache for all user sessions
             for s in sessions:
@@ -1740,7 +1722,7 @@ class VoiceDaemon:
                 return
 
             user_sessions = [s for s in sessions
-                             if '[OCVoice]' not in s.get('title', '')
+                             if 'OCVoice' not in s.get('title', '')
                              and s.get('id') != self._state_session_id]
             if not user_sessions:
                 return
@@ -1787,7 +1769,6 @@ class VoiceDaemon:
 
         print(f"\n{'─'*50}", flush=True)
         print(f"  🤖 Отправляю в OpenCode [{self._current_agent}]...", flush=True)
-        self._notify("OCVoice 🎤", f"Отправляю: {text[:100]}")
 
         if not self.client or not self.client.session_id:
             print(f"[OCVoice] ❌ Нет сессии для отправки", flush=True)

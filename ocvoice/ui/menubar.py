@@ -78,7 +78,7 @@ class OCVoiceMenuBar(rumps.App if HAS_RUMPS else object):
         for s in self._sessions:
             sid = s.get('id', '')
             title = s.get('title', 'untitled')[:50]
-            if '[OCVoice]' in title:
+            if 'OCVoice' in title:
                 continue
             has_user = True
             is_current = sid == self._current_session_id

@@ -166,7 +166,7 @@ class TrayIcon:
         for s in self._sessions:
             sid = s.get('id', '')
             title = s.get('title', 'untitled')[:50]
-            if '[OCVoice]' in title:
+            if 'OCVoice' in title:
                 continue
             is_current = sid == self._current_session_id
             display = f"✓ {title}" if is_current else f"  {title}"

@@ -59,7 +59,7 @@ def show_status():
     try:
         sessions = client.list_sessions()
         user_sessions = [s for s in sessions
-                         if '[OCVoice]' not in s.get('title', '')]
+                         if 'OCVoice' not in s.get('title', '')]
         if client.session_id:
             for s in user_sessions:
                 if s['id'] == client.session_id:
@@ -81,7 +81,7 @@ def select_session():
     client = _get_client()
     sessions = client.list_sessions()
     user_sessions = [s for s in sessions
-                     if '[OCVoice]' not in s.get('title', '')]
+                     if 'OCVoice' not in s.get('title', '')]
 
     if not user_sessions:
         print("📭 Нет сессий. Создайте новую.")
