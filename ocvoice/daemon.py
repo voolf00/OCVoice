@@ -1788,7 +1788,6 @@ class VoiceDaemon:
             response = self.client.send_message(
                 text=text,
                 agent=self._current_agent,
-                model=self._current_model,
             )
             response_text = self._extract_response_text(response)
             if response_text:
