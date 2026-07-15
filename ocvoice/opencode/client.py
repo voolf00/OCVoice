@@ -8,6 +8,7 @@
 @tags: client, network, session, project, message, async
 """
 
+import json
 from typing import Optional
 import threading
 
@@ -259,9 +260,17 @@ class OpenCodeClient:
         if no_reply:
             body["noReply"] = True
 
-        r = self.client.post(f"{self._prefix}/{sid}/message", json=body)
-        r.raise_for_status()
-        return r.json()
+        url = f"{self._prefix}/{sid}/message"
+        print(f"[OCVoice] 📡 POST {url}", flush=True)
+        print(f"[OCVoice] 📡 Body: {json.dumps(body, ensure_ascii=False)}", flush=True)
+        try:
+            r = self.client.post(url, json=body)
+            print(f"[OCVoice] 📡 Response: {r.status_code} {r.text[:500]}", flush=True)
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            print(f"[OCVoice] ❌ HTTP error: {e}", flush=True)
+            raise
 
     def send_prompt_async(self, text: str, session_id: str = None, model: str = None, agent: str = None) -> bool:
         """Send a message asynchronously (fire-and-forget)."""

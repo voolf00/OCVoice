@@ -1774,9 +1774,22 @@ class VoiceDaemon:
             print(f"[OCVoice] ❌ Нет сессии для отправки", flush=True)
             return
 
+        # Validate session_id is a user session, not the state session
+        if self._state_session_id and self.client.session_id == self._state_session_id:
+            print(f"[OCVoice] ❌ session_id указывает на статусную сессию! "
+                  f"id={self.client.session_id[:16]}...", flush=True)
+            return
+
+        sid = self.client.session_id
+        print(f"  📋 Сессия: {sid[:16]}...", flush=True)
+
         try:
             self._set_state("awaiting")
-            response = self.client.send_message(text=text)
+            response = self.client.send_message(
+                text=text,
+                agent=self._current_agent,
+                model=self._current_model,
+            )
             response_text = self._extract_response_text(response)
             if response_text:
                 print(f"  ✅ Ответ:", flush=True)
