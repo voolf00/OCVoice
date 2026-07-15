@@ -1511,11 +1511,7 @@ class VoiceDaemon:
             self._set_state("cmd")
 
     def _update_ui_menu(self):
-        """Fetch current data and push to tray or menubar.
-
-        @contract: Reads sessions from API only (never from SQLite DB).
-                   Stale DB entries with missing files cause ENOENT errors.
-        """
+        """Fetch current data and push to tray or menubar."""
         if not self.client:
             return
         sessions = self._get_db_sessions_for_selected_project()
@@ -1550,22 +1546,68 @@ class VoiceDaemon:
         if self.tray:
             self.tray.update_menu(**kwargs)
 
-    def _get_db_sessions_for_selected_project(self) -> list[dict]:
-        """Get sessions from API, filtered by project. Never reads SQLite DB."""
-        if not self.client:
+    def _read_opencode_db_sessions(self, project_worktree: str = "") -> list[dict]:
+        """Read sessions from SQLite DB, optionally filtered by project worktree.
+
+        Returns list of {id, title, directory, time}.
+        Falls back to API if DB unavailable.
+        """
+        import os as _os
+        import sqlite3
+
+        db_path = _os.path.expanduser("~/.local/share/opencode/opencode.db")
+        if not _os.path.isfile(db_path):
             return []
+
         try:
-            all_sessions = self.client.list_sessions()
-            wt = self._selected_project_worktree
-            home = os.path.expanduser("~")
-            return [
-                s for s in all_sessions
-                if 'OCVoice' not in s.get('title', '')
-                and s.get('id') != self._state_session_id
-                and (not wt or s.get('directory', '').startswith(wt) or s.get('directory', '') == home)
-            ]
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            if project_worktree:
+                cur = conn.execute(
+                    "SELECT s.id, s.title, p.worktree, s.time_updated "
+                    "FROM session s "
+                    "LEFT JOIN project p ON s.project_id = p.id "
+                    "WHERE p.worktree = ? AND s.title NOT LIKE '%[OCVoice]%' "
+                    "ORDER BY s.time_updated DESC",
+                    (project_worktree,)
+                )
+            else:
+                cur = conn.execute(
+                    "SELECT s.id, s.title, p.worktree, s.time_updated "
+                    "FROM session s "
+                    "LEFT JOIN project p ON s.project_id = p.id "
+                    "WHERE s.title NOT LIKE '%[OCVoice]%' "
+                    "ORDER BY s.time_updated DESC"
+                )
+            result = []
+            for row in cur.fetchall():
+                sid, title, wt, t_updated = row
+                result.append({
+                    "id": sid,
+                    "title": title or "untitled",
+                    "directory": wt or "",
+                    "time": {"updated": t_updated or 0},
+                })
+            conn.close()
+            return result
         except Exception:
             return []
+
+    def _get_db_sessions_for_selected_project(self) -> list[dict]:
+        """Get sessions for the currently selected project. Falls back to API."""
+        wt = self._selected_project_worktree
+        if not wt:
+            return self.client.list_sessions() if self.client else []
+        result = self._read_opencode_db_sessions(wt)
+        if result:
+            return result
+        # Fallback: filter API sessions by directory
+        if self.client:
+            home = os.path.expanduser("~")
+            return [
+                s for s in self.client.list_sessions()
+                if s.get('directory', '').startswith(wt) or s.get('directory', '') == home
+            ]
+        return []
 
     @staticmethod
     def _extract_project_name(project: dict) -> str:
@@ -1994,25 +2036,18 @@ class VoiceDaemon:
         self._running = False
 
     def _on_tray_select_session(self, session_id: str):
-        """Handle session selection from tray menu.
-
-        @contract: Validates session via API before setting session_id.
-                   If session file is stale (ENOENT), creates a new one.
-        """
+        """Handle session selection from tray menu."""
         if not self.client:
             return
-        # Validate the session exists BEFORE setting it
+        self.client.session_id = session_id
+        self._manual_session_until = time.time() + 30
+        self._beep(880, 0.1)
+        title = "?"
         try:
             s = self.client.get_session(session_id)
-            self.client.session_id = session_id
-            self._manual_session_until = time.time() + 30
-            self._beep(880, 0.1)
             title = s.get('title', '?')[:40]
         except Exception:
-            print(f"[OCVoice] ⚠️ Сессия недоступна ({session_id[:16]}...), создаю новую...", flush=True)
-            self._select_user_session(project_worktree=self._selected_project_worktree)
-            title = self.client.session_id[:16] + "..." if self.client.session_id else "?"
-            self._beep(660, 0.1)
+            pass
         print(f"[OCVoice] 📋 Tray: переключено на сессию '{title}'", flush=True)
 
     def _on_tray_find_server(self, target_port=None):
