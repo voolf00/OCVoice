@@ -1344,8 +1344,12 @@ class VoiceDaemon:
         self._select_user_session()
         return True
 
-    def _select_user_session(self):
-        """Select the most recently updated user session and fill timestamp cache."""
+    def _select_user_session(self, project_worktree: str = ""):
+        """Select the most recently updated user session and fill timestamp cache.
+
+        @param project_worktree: If set, only sessions in this project are considered
+        @contract: Always sets self.client.session_id to a valid session
+        """
         if not self.client:
             return
         try:
@@ -1353,6 +1357,10 @@ class VoiceDaemon:
             user_sessions = [s for s in sessions
                              if 'OCVoice' not in s.get('title', '')
                              and s.get('id') != self._state_session_id]
+            # Filter by project if specified
+            if project_worktree:
+                user_sessions = [s for s in user_sessions
+                                 if s.get('directory', '').startswith(project_worktree)]
             # Fill timestamp cache for all user sessions
             for s in sessions:
                 self._session_timestamps[s['id']] = s.get('time', {}).get('updated', 0)
@@ -1808,7 +1816,7 @@ class VoiceDaemon:
                 err_text = err_body.text if err_body is not None else ''
                 if attempt == 0 and ("ENOENT" in err_text or "no such file" in err_text.lower()):
                     print(f"  ⚠️ Сессия устарела ({sid[:16]}...), обновляю...", flush=True)
-                    self._select_user_session()
+                    self._select_user_session(project_worktree=self._selected_project_worktree)
                     sid = self.client.session_id
                     if sid:
                         print(f"  📋 Новая сессия: {sid[:16]}...", flush=True)
@@ -2082,6 +2090,13 @@ class VoiceDaemon:
                     print(f"  📋 Создана новая сессия ({s['id'][:20]}...)", flush=True)
             except Exception as e:
                 print(f"  ❌ Не удалось создать сессию: {e}", flush=True)
+
+        # Validate the selected session is accessible via API
+        try:
+            self.client.get_session(self.client.session_id)
+        except Exception:
+            print(f"  ⚠️ Сессия недоступна, ищу валидную в проекте {name}...", flush=True)
+            self._select_user_session(project_worktree=worktree)
 
         self._set_state("waiting")
         self._update_ui_menu()
