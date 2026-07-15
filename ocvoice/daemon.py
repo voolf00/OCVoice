@@ -1789,10 +1789,7 @@ class VoiceDaemon:
                 sid = self.client.session_id
                 if attempt == 0:
                     print(f"  📋 Сессия: {sid[:16]}...", flush=True)
-                response = self.client.send_message(
-                    text=text,
-                    agent=self._current_agent,
-                )
+                response = self.client.send_message(text=text)
                 response_text = self._extract_response_text(response)
                 if response_text:
                     print(f"  ✅ Ответ:", flush=True)
