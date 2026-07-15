@@ -1759,10 +1759,10 @@ class VoiceDaemon:
             pass
 
     def _send_message(self, text: str):
-        """Send a message — tries TUI/Desktop prompt first, then REST API fallback.
+        """Send a message via REST API to the locked session.
 
-        @contract: TUI approach (append+submit) makes message visible in Desktop UI.
-                   REST API fallback ensures message is stored in the session.
+        @contract: Sends to self.client.session_id (locked, never auto-switched).
+                   Retries ONCE with fresh session selection on ENOENT.
         """
         if not text:
             return
@@ -1770,28 +1770,14 @@ class VoiceDaemon:
         print(f"\n{'─'*50}", flush=True)
         print(f"  🤖 Отправляю в OpenCode [{self._current_agent}]...", flush=True)
 
+        if not self.client or not self.client.session_id:
+            print(f"[OCVoice] ❌ Нет сессии для отправки", flush=True)
+            return
+
         # Validate session_id is a user session, not the state session
-        if self._state_session_id and self.client and self.client.session_id == self._state_session_id:
+        if self._state_session_id and self.client.session_id == self._state_session_id:
             print(f"[OCVoice] ❌ session_id указывает на статусную сессию! "
                   f"id={self.client.session_id[:16]}...", flush=True)
-            return
-
-        # Route 1: TUI/Desktop prompt (visible in Desktop UI)
-        try:
-            self._set_state("awaiting")
-            self.client.tui_append_prompt(text)
-            self.client.tui_submit_prompt()
-            print(f"  ✅ Отправлено через TUI/Desktop", flush=True)
-            self._set_state("waiting")
-            print(f"{'─'*50}\n", flush=True)
-            return
-        except Exception as e:
-            print(f"  ⚠️ TUI отправка не удалась ({e}), пробую REST API...", flush=True)
-
-        # Route 2: REST API (fallback — requires valid session_id)
-        if not self.client or not self.client.session_id:
-            print(f"[OCVoice] ❌ Нет сессии для REST API", flush=True)
-            print(f"{'─'*50}\n", flush=True)
             return
 
         for attempt in range(2):
@@ -1799,7 +1785,7 @@ class VoiceDaemon:
                 self._set_state("awaiting")
                 sid = self.client.session_id
                 if attempt == 0:
-                    print(f"  📋 REST-сессия: {sid[:16]}...", flush=True)
+                    print(f"  📋 Сессия: {sid[:16]}...", flush=True)
                 response = self.client.send_message(text=text)
                 response_text = self._extract_response_text(response)
                 if response_text:
