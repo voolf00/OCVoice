@@ -422,6 +422,7 @@ class VoiceDaemon:
         self._listening = True  # Ensure fresh start, ignore stale state
         self._init_state_session()
         self._select_user_session()
+        self._sync_config_from_server()
         self._set_state("waiting")
 
         # Start audio in background thread
@@ -1394,6 +1395,21 @@ class VoiceDaemon:
 
             # Lock this session — no auto-switching
             self._manual_session_until = float('inf')
+        except Exception:
+            pass
+
+    def _sync_config_from_server(self):
+        """Sync model/agent from OpenCode server config (Desktop settings)."""
+        if not self.client:
+            return
+        try:
+            cfg = self.client.get_config()
+            server_model = cfg.get('model', '')
+            server_agent = cfg.get('default_agent', '')
+            if server_model:
+                self._current_model = server_model
+            if server_agent:
+                self._current_agent = server_agent
         except Exception:
             pass
 
